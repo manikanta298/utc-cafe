@@ -1,7 +1,14 @@
 import axios from 'axios';
 
-// Use environment variable or fallback to production URL
-const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'https://utc-cafe.onrender.com';
+const API_ROOT = '/api';
+
+const normalizeBackendUrl = (url) => {
+  const trimmed = (url || 'https://utc-cafe.onrender.com').replace(/\/+$/, '');
+  return trimmed.endsWith(API_ROOT) ? trimmed : `${trimmed}${API_ROOT}`;
+};
+
+// Use environment variable or fallback to production API URL
+const BACKEND_URL = normalizeBackendUrl(import.meta.env.VITE_BACKEND_URL);
 
 const api = axios.create({
   baseURL: BACKEND_URL,
@@ -11,27 +18,21 @@ const api = axios.create({
   },
 });
 
-// Request counter for retry logic
-let requestCount = 0;
 const MAX_RETRIES = 3;
 
 // Attach token on every request
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('utc_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
-  requestCount++;
   return config;
 });
 
 // Enhanced error handler with retry logic
 api.interceptors.response.use(
   (res) => {
-    requestCount--;
     return res;
   },
   async (err) => {
-    requestCount--;
-    
     // Handle 401 Unauthorized
     if (err.response?.status === 401) {
       localStorage.removeItem('utc_token');
@@ -40,8 +41,12 @@ api.interceptors.response.use(
     }
 
     // Retry logic for network errors (ECONNABORTED, ENOTFOUND, ERR_FAILED)
-    if (!err.response && err.config && requestCount < MAX_RETRIES) {
+    if (!err.response && err.config) {
       err.config.__retryCount = (err.config.__retryCount || 0) + 1;
+
+      if (err.config.__retryCount > MAX_RETRIES) {
+        return Promise.reject(err);
+      }
       
       // Exponential backoff: 1s, 2s, 4s
       const delay = Math.pow(2, err.config.__retryCount - 1) * 1000;
