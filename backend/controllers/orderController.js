@@ -1,0 +1,263 @@
+const Order = require('../models/Order');
+const Customer = require('../models/Customer');
+const Franchise = require('../models/Franchise');
+const MenuItem = require('../models/MenuItem');
+const Invoice = require('../models/Invoice');
+const Loyalty = require('../models/Loyalty');
+const { determineTaxType, calculateOrderTax, calculatePointsEarned, calculatePointsValue } = require('../utils/gst');
+const { sendOrderPlaced } = require('../utils/sms');
+
+// Generate order number: FR01-ORD-00001
+const generateOrderNumber = async (franchise) => {
+  const count = await Order.countDocuments({ franchise_id: franchise._id });
+  return `${franchise.franchiseCode}-ORD-${String(count + 1).padStart(5, '0')}`;
+};
+
+// Generate token number (daily sequential per franchise)
+const generateTokenNumber = async (franchiseId) => {
+  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
+  const count = await Order.countDocuments({ franchise_id: franchiseId, createdAt: { $gte: startOfDay } });
+  return count + 1;
+};
+
+// @POST /api/orders  — Create new order (POS staff)
+const createOrder = async (req, res) => {
+  try {
+    const {
+      customer_id,
+      items,            // [{item_id, quantity}]
+      payment_mode,
+      points_to_redeem, // optional
+      customer_state,   // optional — for IGST logic
+    } = req.body;
+
+    const franchise = await Franchise.findById(req.user.franchise_id);
+    if (!franchise) return res.status(404).json({ success: false, message: 'Franchise not found' });
+
+    const customer = await Customer.findById(customer_id);
+    if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+    // Validate and build order items with current prices
+    const orderItems = [];
+    for (const line of items) {
+      const menuItem = await MenuItem.findById(line.item_id);
+      if (!menuItem || !menuItem.isGlobalActive) {
+        return res.status(400).json({ success: false, message: `Item not available: ${line.item_id}` });
+      }
+      if (menuItem.disabledInFranchises.includes(franchise._id.toString())) {
+        return res.status(400).json({ success: false, message: `Item disabled at this outlet: ${menuItem.name}` });
+      }
+      orderItems.push({
+        item_id: menuItem._id,
+        name: menuItem.name,
+        price: menuItem.price,
+        gst_rate: menuItem.gst_rate,
+        hsn_code: menuItem.hsn_code,
+        quantity: line.quantity,
+        item_total: +(menuItem.price * line.quantity).toFixed(2),
+      });
+    }
+
+    // Determine tax type
+    const taxType = determineTaxType(franchise.state, customer_state || franchise.state);
+
+    // Calculate taxes
+    const { subTotal, cgst, sgst, igst, totalTax, grossTotal } = calculateOrderTax(orderItems, taxType);
+
+    // Loyalty point redemption
+    let discountAmount = 0;
+    let pointsRedeemed = 0;
+    if (points_to_redeem && points_to_redeem > 0) {
+      const maxRedeemable = Math.min(points_to_redeem, customer.total_points);
+      discountAmount = calculatePointsValue(maxRedeemable);
+      pointsRedeemed = maxRedeemable;
+    }
+
+    const finalAmount = Math.max(0, +(grossTotal - discountAmount).toFixed(2));
+
+    // Points earned on final paid amount
+    const pointsEarned = calculatePointsEarned(finalAmount);
+
+    const orderNumber = await generateOrderNumber(franchise);
+    const tokenNumber = await generateTokenNumber(franchise._id);
+
+    const order = await Order.create({
+      order_number: orderNumber,
+      franchise_id: franchise._id,
+      customer_id: customer._id,
+      items: orderItems,
+      sub_total: subTotal,
+      cgst_amount: cgst,
+      sgst_amount: sgst,
+      igst_amount: igst,
+      total_tax: totalTax,
+      gross_total: grossTotal,
+      discount_amount: discountAmount,
+      points_redeemed: pointsRedeemed,
+      final_amount: finalAmount,
+      tax_type: taxType,
+      payment_mode,
+      payment_status: 'Paid',
+      kitchen_status: 'Pending',
+      token_number: tokenNumber,
+      created_by: req.user._id,
+      points_earned: pointsEarned,
+      status_history: [{ status: 'Pending', updatedBy: req.user._id }],
+    });
+
+    // Update customer totals and points
+    const balanceBefore = customer.total_points;
+    customer.total_points = customer.total_points - pointsRedeemed + pointsEarned;
+    customer.total_orders += 1;
+    customer.total_spent += finalAmount;
+    await customer.save();
+
+    // Record loyalty transactions
+    if (pointsRedeemed > 0) {
+      await Loyalty.create({
+        customer_id: customer._id,
+        order_id: order._id,
+        franchise_id: franchise._id,
+        transaction_type: 'redeem',
+        points_used: pointsRedeemed,
+        balance_before: balanceBefore,
+        balance_after: balanceBefore - pointsRedeemed,
+        bill_amount: finalAmount,
+      });
+    }
+    await Loyalty.create({
+      customer_id: customer._id,
+      order_id: order._id,
+      franchise_id: franchise._id,
+      transaction_type: 'earn',
+      points_earned: pointsEarned,
+      balance_before: balanceBefore - pointsRedeemed,
+      balance_after: customer.total_points,
+      bill_amount: finalAmount,
+    });
+
+    // Generate invoice
+    franchise.invoiceCounter += 1;
+    await franchise.save();
+    const invoiceNo = `${franchise.franchiseCode}-INV-${String(franchise.invoiceCounter).padStart(3, '0')}`;
+
+    const invoice = await Invoice.create({
+      invoice_no: invoiceNo,
+      order_id: order._id,
+      franchise_id: franchise._id,
+      customer_id: customer._id,
+      franchise_name: franchise.name,
+      franchise_gstin: franchise.gstin,
+      franchise_address: franchise.address,
+      franchise_state: franchise.state,
+      customer_name: customer.name,
+      customer_phone: customer.phone_no,
+      taxable_amount: subTotal,
+      cgst,
+      sgst,
+      igst,
+      total_tax: totalTax,
+      discount_amount: discountAmount,
+      final_amount: finalAmount,
+      payment_mode,
+      items: orderItems.map((i) => ({
+        name: i.name,
+        hsn_code: i.hsn_code,
+        quantity: i.quantity,
+        price: i.price,
+        gst_rate: i.gst_rate,
+        item_total: i.item_total,
+      })),
+    });
+
+    // Emit to kitchen via Socket.io
+    const io = req.app.get('io');
+    const populatedOrder = await Order.findById(order._id)
+      .populate('customer_id', 'name phone_no')
+      .populate('franchise_id', 'name franchiseCode');
+    io.to(`franchise:${franchise._id}`).emit('order:new', populatedOrder);
+
+    // SMS — Order placed notification (non-blocking)
+    sendOrderPlaced(
+      customer.phone_no,
+      customer.name,
+      order.order_number,
+      order.token_number,
+      franchise.name,
+      finalAmount.toFixed(2)
+    ).catch((e) => console.error('SMS sendOrderPlaced error:', e.message));
+
+    res.status(201).json({
+      success: true,
+      order: populatedOrder,
+      invoice,
+      customer: { ...customer.toObject(), total_points: customer.total_points },
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// @GET /api/orders  — List orders (franchise-scoped)
+const getOrders = async (req, res) => {
+  try {
+    const { page = 1, limit = 20, status, date, search } = req.query;
+    const filter = {};
+
+    if (req.user.role !== 'master_admin') {
+      filter.franchise_id = req.user.franchise_id._id || req.user.franchise_id;
+    } else if (req.query.franchise_id) {
+      filter.franchise_id = req.query.franchise_id;
+    }
+
+    if (status) filter.kitchen_status = status;
+
+    if (date) {
+      const d = new Date(date);
+      const nextDay = new Date(d); nextDay.setDate(d.getDate() + 1);
+      filter.createdAt = { $gte: d, $lt: nextDay };
+    }
+
+    const skip = (page - 1) * limit;
+    const [orders, total] = await Promise.all([
+      Order.find(filter)
+        .populate('customer_id', 'name phone_no')
+        .populate('franchise_id', 'name franchiseCode')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
+      Order.countDocuments(filter),
+    ]);
+
+    res.json({ success: true, orders, total, page: Number(page), pages: Math.ceil(total / limit) });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// @GET /api/orders/:id
+const getOrderById = async (req, res) => {
+  try {
+    const order = await Order.findById(req.params.id)
+      .populate('customer_id', 'name phone_no total_points')
+      .populate('franchise_id', 'name franchiseCode state gstin address')
+      .populate('created_by', 'name');
+
+    if (!order) return res.status(404).json({ success: false, message: 'Order not found' });
+
+    // Franchise isolation
+    if (req.user.role !== 'master_admin') {
+      const userFranchise = (req.user.franchise_id._id || req.user.franchise_id).toString();
+      if (order.franchise_id._id.toString() !== userFranchise) {
+        return res.status(403).json({ success: false, message: 'Access denied' });
+      }
+    }
+
+    res.json({ success: true, order });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = { createOrder, getOrders, getOrderById };
