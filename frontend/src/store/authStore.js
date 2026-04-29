@@ -18,7 +18,13 @@ const useAuthStore = create((set, get) => ({
       // Return user so LoginPage can navigate immediately without waiting
       return { success: true, user: data.user };
     } catch (err) {
-      const msg = err.response?.data?.message || 'Login failed';
+      // Use custom user-friendly message if available (from API interceptor)
+      const msg = err.userMessage || 
+                  err.response?.data?.message || 
+                  err.message ||
+                  'Login failed. Please try again.';
+      
+      console.error('[Auth] Login error:', err);
       set({ error: msg, loading: false });
       return { success: false, message: msg };
     }
