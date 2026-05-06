@@ -1,5 +1,5 @@
-// ── routes/invoices.js
 const express = require('express');
+const PDFDocument = require('pdfkit');
 const router = express.Router();
 const Invoice = require('../models/Invoice');
 const { protect, authorise } = require('../middleware/auth');
@@ -8,6 +8,8 @@ const csvEscape = (value) => {
   const text = value === undefined || value === null ? '' : String(value);
   return `"${text.replace(/"/g, '""')}"`;
 };
+
+const formatCurrency = (value) => `Rs. ${Number(value || 0).toFixed(2)}`;
 
 const assertInvoiceAccess = (req, invoice) => {
   if (req.user.role === 'master_admin') return true;
@@ -18,12 +20,15 @@ const assertInvoiceAccess = (req, invoice) => {
 };
 
 const buildInvoiceFilter = (req) => {
-  const { franchiseId, month, year } = req.query;
+  const { franchiseId, month, year, phone } = req.query;
   const filter = {};
   if (req.user.role !== 'master_admin') {
     filter.franchise_id = req.user.franchise_id._id || req.user.franchise_id;
   } else if (franchiseId) {
     filter.franchise_id = franchiseId;
+  }
+  if (phone) {
+    filter.customer_phone = phone.trim();
   }
   if (month && year) {
     const start = new Date(year, month - 1, 1);
@@ -33,16 +38,151 @@ const buildInvoiceFilter = (req) => {
   return filter;
 };
 
+const renderReceiptHtml = (invoice) => {
+  const rows = (invoice.items || []).map((item) => `
+    <tr>
+      <td>${item.name || ''}</td>
+      <td>${item.quantity || 0}</td>
+      <td>${Number(item.price || 0).toFixed(2)}</td>
+      <td>${Number(item.item_total || 0).toFixed(2)}</td>
+    </tr>
+  `).join('');
+
+  return `<!doctype html>
+    <html>
+    <head>
+      <title>${invoice.invoice_no}</title>
+      <style>
+        body { font-family: Arial, sans-serif; color: #111; margin: 24px; }
+        .receipt { max-width: 380px; margin: 0 auto; }
+        h1, h2, p { margin: 0; text-align: center; }
+        h1 { font-size: 20px; }
+        h2 { font-size: 14px; margin-top: 4px; }
+        .meta, .totals { margin-top: 14px; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+        th, td { border-bottom: 1px dashed #aaa; padding: 6px 2px; text-align: left; }
+        td:nth-child(2), td:nth-child(3), td:nth-child(4), th:nth-child(2), th:nth-child(3), th:nth-child(4) { text-align: right; }
+        .line { display: flex; justify-content: space-between; margin: 4px 0; }
+        .final { font-size: 16px; font-weight: 700; border-top: 1px solid #111; padding-top: 8px; }
+        @media print { button { display: none; } body { margin: 0; } }
+      </style>
+    </head>
+    <body>
+      <div class="receipt">
+        <h1>${invoice.franchise_name || invoice.franchise_id?.name || 'UTC Cafe'}</h1>
+        <p>${invoice.franchise_address || invoice.franchise_id?.address || ''}</p>
+        <h2>Tax Invoice</h2>
+        <div class="meta">
+          <div class="line"><span>Invoice</span><strong>${invoice.invoice_no}</strong></div>
+          <div class="line"><span>Date</span><span>${new Date(invoice.invoice_date || invoice.createdAt).toLocaleString('en-IN')}</span></div>
+          <div class="line"><span>Customer</span><span>${invoice.customer_name || ''}</span></div>
+          <div class="line"><span>Mobile</span><span>${invoice.customer_phone || ''}</span></div>
+          <div class="line"><span>GSTIN</span><span>${invoice.franchise_gstin || invoice.franchise_id?.gstin || ''}</span></div>
+        </div>
+        <table>
+          <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+        <div class="totals">
+          <div class="line"><span>Taxable</span><span>${formatCurrency(invoice.taxable_amount)}</span></div>
+          <div class="line"><span>CGST</span><span>${formatCurrency(invoice.cgst)}</span></div>
+          <div class="line"><span>SGST</span><span>${formatCurrency(invoice.sgst)}</span></div>
+          <div class="line"><span>IGST</span><span>${formatCurrency(invoice.igst)}</span></div>
+          <div class="line"><span>Discount</span><span>${formatCurrency(invoice.discount_amount)}</span></div>
+          <div class="line final"><span>Total</span><span>${formatCurrency(invoice.final_amount)}</span></div>
+        </div>
+        <p style="margin-top:18px;font-size:12px;">Thank you. Please visit again.</p>
+        <button onclick="window.print()" style="margin-top:16px;width:100%;padding:10px;">Print / Save PDF</button>
+      </div>
+    </body>
+    </html>`;
+};
+
+const streamInvoicePdf = (res, invoice) => {
+  const doc = new PDFDocument({ size: 'A4', margin: 40 });
+
+  res.setHeader('Content-Type', 'application/pdf');
+  res.setHeader('Content-Disposition', `attachment; filename="${invoice.invoice_no}.pdf"`);
+  doc.pipe(res);
+
+  doc.fontSize(18).text(invoice.franchise_name || invoice.franchise_id?.name || 'UTC Cafe', { align: 'center' });
+  doc.moveDown(0.2);
+  doc.fontSize(10).text(invoice.franchise_address || invoice.franchise_id?.address || '', { align: 'center' });
+  doc.moveDown(0.2);
+  doc.fontSize(12).text('Tax Invoice', { align: 'center' });
+  doc.moveDown();
+
+  const metaRows = [
+    ['Invoice', invoice.invoice_no],
+    ['Date', new Date(invoice.invoice_date || invoice.createdAt).toLocaleString('en-IN')],
+    ['Customer', invoice.customer_name || ''],
+    ['Mobile', invoice.customer_phone || ''],
+    ['GSTIN', invoice.franchise_gstin || invoice.franchise_id?.gstin || ''],
+  ];
+
+  metaRows.forEach(([label, value]) => {
+    doc.font('Helvetica-Bold').text(`${label}: `, { continued: true });
+    doc.font('Helvetica').text(value || '');
+  });
+
+  doc.moveDown();
+  doc.font('Helvetica-Bold').text('Items');
+  doc.moveDown(0.5);
+
+  (invoice.items || []).forEach((item) => {
+    doc.font('Helvetica-Bold').text(item.name || '', { continued: true });
+    doc.font('Helvetica').text(`  x${item.quantity || 0}`);
+    doc.fontSize(10).fillColor('#555').text(`Rate ${formatCurrency(item.price)} · Total ${formatCurrency(item.item_total)}`);
+    doc.fillColor('#000').fontSize(12).moveDown(0.4);
+  });
+
+  doc.moveDown();
+  [
+    ['Taxable', invoice.taxable_amount],
+    ['CGST', invoice.cgst],
+    ['SGST', invoice.sgst],
+    ['IGST', invoice.igst],
+    ['Discount', invoice.discount_amount],
+    ['Total', invoice.final_amount],
+  ].forEach(([label, value]) => {
+    doc.font(label === 'Total' ? 'Helvetica-Bold' : 'Helvetica').text(`${label}: ${formatCurrency(value)}`, { align: 'right' });
+  });
+
+  doc.moveDown();
+  doc.fontSize(10).font('Helvetica').text('Thank you. Please visit again.', { align: 'center' });
+  doc.end();
+};
+
 router.get('/', protect, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const filter = buildInvoiceFilter(req);
     const skip = (page - 1) * limit;
     const [invoices, total] = await Promise.all([
-      Invoice.find(filter).populate('franchise_id', 'name franchiseCode').sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
+      Invoice.find(filter)
+        .populate('franchise_id', 'name franchiseCode')
+        .sort({ createdAt: -1 })
+        .skip(skip)
+        .limit(Number(limit)),
       Invoice.countDocuments(filter),
     ]);
     res.json({ success: true, invoices, total });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/search', protect, authorise('pos_staff', 'manager', 'franchise_owner'), async (req, res) => {
+  try {
+    const { phone } = req.query;
+    if (!phone) return res.status(400).json({ success: false, message: 'Phone number required' });
+
+    const invoices = await Invoice.find(buildInvoiceFilter(req))
+      .populate('franchise_id', 'name franchiseCode')
+      .sort({ invoice_date: -1, createdAt: -1 })
+      .limit(100);
+
+    res.json({ success: true, invoices });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
@@ -100,66 +240,22 @@ router.get('/:id/receipt', protect, async (req, res) => {
     if (!invoice) return res.status(404).send('Invoice not found');
     if (!assertInvoiceAccess(req, invoice)) return res.status(403).send('Access denied');
 
-    const rows = invoice.items.map((item) => `
-      <tr>
-        <td>${item.name || ''}</td>
-        <td>${item.quantity || 0}</td>
-        <td>${Number(item.price || 0).toFixed(2)}</td>
-        <td>${Number(item.item_total || 0).toFixed(2)}</td>
-      </tr>
-    `).join('');
-
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.send(`<!doctype html>
-      <html>
-      <head>
-        <title>${invoice.invoice_no}</title>
-        <style>
-          body { font-family: Arial, sans-serif; color: #111; margin: 24px; }
-          .receipt { max-width: 380px; margin: 0 auto; }
-          h1, h2, p { margin: 0; text-align: center; }
-          h1 { font-size: 20px; }
-          h2 { font-size: 14px; margin-top: 4px; }
-          .meta, .totals { margin-top: 14px; font-size: 12px; }
-          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
-          th, td { border-bottom: 1px dashed #aaa; padding: 6px 2px; text-align: left; }
-          td:nth-child(2), td:nth-child(3), td:nth-child(4), th:nth-child(2), th:nth-child(3), th:nth-child(4) { text-align: right; }
-          .line { display: flex; justify-content: space-between; margin: 4px 0; }
-          .final { font-size: 16px; font-weight: 700; border-top: 1px solid #111; padding-top: 8px; }
-          @media print { button { display: none; } body { margin: 0; } }
-        </style>
-      </head>
-      <body>
-        <div class="receipt">
-          <h1>${invoice.franchise_name || invoice.franchise_id?.name || 'UTC Cafe'}</h1>
-          <p>${invoice.franchise_address || invoice.franchise_id?.address || ''}</p>
-          <h2>Tax Invoice</h2>
-          <div class="meta">
-            <div class="line"><span>Invoice</span><strong>${invoice.invoice_no}</strong></div>
-            <div class="line"><span>Date</span><span>${new Date(invoice.invoice_date || invoice.createdAt).toLocaleString('en-IN')}</span></div>
-            <div class="line"><span>Customer</span><span>${invoice.customer_name || ''}</span></div>
-            <div class="line"><span>Mobile</span><span>${invoice.customer_phone || ''}</span></div>
-            <div class="line"><span>GSTIN</span><span>${invoice.franchise_gstin || invoice.franchise_id?.gstin || ''}</span></div>
-          </div>
-          <table>
-            <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead>
-            <tbody>${rows}</tbody>
-          </table>
-          <div class="totals">
-            <div class="line"><span>Taxable</span><span>Rs. ${Number(invoice.taxable_amount || 0).toFixed(2)}</span></div>
-            <div class="line"><span>CGST</span><span>Rs. ${Number(invoice.cgst || 0).toFixed(2)}</span></div>
-            <div class="line"><span>SGST</span><span>Rs. ${Number(invoice.sgst || 0).toFixed(2)}</span></div>
-            <div class="line"><span>IGST</span><span>Rs. ${Number(invoice.igst || 0).toFixed(2)}</span></div>
-            <div class="line"><span>Discount</span><span>Rs. ${Number(invoice.discount_amount || 0).toFixed(2)}</span></div>
-            <div class="line final"><span>Total</span><span>Rs. ${Number(invoice.final_amount || 0).toFixed(2)}</span></div>
-          </div>
-          <p style="margin-top:18px;font-size:12px;">Thank you. Please visit again.</p>
-          <button onclick="window.print()" style="margin-top:16px;width:100%;padding:10px;">Print / Save PDF</button>
-        </div>
-      </body>
-      </html>`);
+    res.send(renderReceiptHtml(invoice));
   } catch (err) {
     res.status(500).send(err.message);
+  }
+});
+
+router.get('/:id/pdf', protect, async (req, res) => {
+  try {
+    const invoice = await Invoice.findById(req.params.id).populate('franchise_id', 'name franchiseCode state gstin address phone');
+    if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+    if (!assertInvoiceAccess(req, invoice)) return res.status(403).json({ success: false, message: 'Access denied' });
+
+    streamInvoicePdf(res, invoice);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
   }
 });
 

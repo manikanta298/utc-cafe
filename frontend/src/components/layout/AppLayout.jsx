@@ -1,9 +1,19 @@
-import { Outlet, NavLink, useNavigate } from 'react-router-dom';
+import { Outlet, NavLink, useLocation, useNavigate } from 'react-router-dom';
 import {
-  Coffee, LayoutDashboard, Store, UtensilsCrossed, Users,
-  Receipt, FileText, ChefHat, LogOut, Menu, X, Settings
+  Coffee,
+  LayoutDashboard,
+  Store,
+  UtensilsCrossed,
+  Users,
+  Receipt,
+  FileText,
+  ChefHat,
+  LogOut,
+  Menu,
+  X,
+  History,
 } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
 
@@ -22,7 +32,16 @@ const FRANCHISE_NAV = [
   { to: '/franchise/menu', icon: UtensilsCrossed, label: 'Menu' },
   { to: '/franchise/staff', icon: Users, label: 'Staff' },
   { to: '/franchise/invoices', icon: FileText, label: 'Reports' },
+  { to: '/pos', icon: Receipt, label: 'POS Billing', matchPaths: ['/pos', '/pos/history'] },
+  { to: '/kitchen', icon: ChefHat, label: 'Kitchen' },
+];
+
+const POS_NAV = [
   { to: '/pos', icon: Receipt, label: 'POS Billing' },
+  { to: '/pos/history', icon: History, label: 'Order History' },
+];
+
+const KITCHEN_NAV = [
   { to: '/kitchen', icon: ChefHat, label: 'Kitchen' },
 ];
 
@@ -30,17 +49,51 @@ const ROLE_LABELS = {
   master_admin: 'Master Admin',
   franchise_owner: 'Franchise Owner',
   manager: 'Manager',
-  pos_staff: 'Shift Operator',
+  pos_staff: 'POS Staff',
   shift_operator: 'Shift Operator',
   kitchen_staff: 'Kitchen Staff',
+};
+
+const getNavForRole = (role) => {
+  switch (role) {
+    case 'master_admin':
+      return MASTER_NAV;
+    case 'franchise_owner':
+    case 'manager':
+      return FRANCHISE_NAV;
+    case 'pos_staff':
+    case 'shift_operator':
+      return POS_NAV;
+    case 'kitchen_staff':
+      return KITCHEN_NAV;
+    default:
+      return [];
+  }
 };
 
 export default function AppLayout() {
   const { user, logout } = useAuthStore();
   const navigate = useNavigate();
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const location = useLocation();
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
+  const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024);
 
-  const nav = user?.role === 'master_admin' ? MASTER_NAV : FRANCHISE_NAV;
+  const nav = useMemo(() => getNavForRole(user?.role), [user?.role]);
+
+  useEffect(() => {
+    const handleResize = () => {
+      const mobile = window.innerWidth < 1024;
+      setIsMobile(mobile);
+      setSidebarOpen((current) => (mobile ? false : current || !mobile));
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  useEffect(() => {
+    if (isMobile) setSidebarOpen(false);
+  }, [location.pathname, isMobile]);
 
   const handleLogout = () => {
     logout();
@@ -50,98 +103,113 @@ export default function AppLayout() {
 
   return (
     <div className="flex min-h-screen bg-dark-900">
-      {/* Sidebar */}
+      {isMobile && sidebarOpen ? (
+        <button
+          type="button"
+          aria-label="Close navigation overlay"
+          onClick={() => setSidebarOpen(false)}
+          className="fixed inset-0 z-30 bg-black/60 backdrop-blur-sm lg:hidden"
+        />
+      ) : null}
+
       <aside
-        className={`${sidebarOpen ? 'w-60' : 'w-16'} flex-shrink-0 bg-dark-800 border-r border-dark-600 flex flex-col transition-all duration-300 z-30`}
+        className={[
+          'fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-dark-600 bg-dark-800 transition-transform duration-300 lg:static lg:z-auto lg:w-64',
+          sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
+        ].join(' ')}
       >
-        {/* Logo */}
-        <div className="flex items-center gap-3 px-4 py-5 border-b border-dark-600">
-          <div className="w-9 h-9 bg-brand-500 rounded-xl flex items-center justify-center flex-shrink-0">
-            <Coffee size={20} className="text-white" />
-          </div>
-          {sidebarOpen && (
-            <div className="overflow-hidden">
-              <div className="font-display font-bold text-white leading-tight">UTC Café</div>
-              <div className="text-[10px] text-gray-600 uppercase tracking-widest">Management</div>
+        <div className="flex items-center justify-between gap-3 border-b border-dark-600 px-4 py-5">
+          <div className="flex items-center gap-3 min-w-0">
+            <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-brand-500 flex-shrink-0">
+              <Coffee size={20} className="text-white" />
             </div>
-          )}
+            <div className="min-w-0">
+              <div className="font-display font-bold text-white leading-tight truncate">UTC Cafe</div>
+              <div className="text-[10px] text-gray-600 uppercase tracking-widest truncate">Operations</div>
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => setSidebarOpen(false)}
+            className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-dark-700 hover:text-white lg:hidden"
+          >
+            <X size={18} />
+          </button>
         </div>
 
-        {/* Nav */}
-        <nav className="flex-1 py-4 px-2 space-y-1 overflow-y-auto">
-          {nav.map(({ to, icon: Icon, label }) => (
-            <NavLink
-              key={to}
-              to={to}
-              className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
-                ${isActive
-                  ? 'bg-brand-500/15 text-brand-400 border border-brand-500/20'
-                  : 'text-gray-500 hover:text-white hover:bg-dark-600'}`
-              }
-            >
-              <Icon size={18} className="flex-shrink-0" />
-              {sidebarOpen && <span className="truncate">{label}</span>}
-            </NavLink>
-          ))}
+        <nav className="flex-1 space-y-1 overflow-y-auto px-2 py-4">
+          {nav.map(({ to, icon: Icon, label, matchPaths }) => {
+            const isActive = matchPaths
+              ? matchPaths.some((path) => location.pathname === path)
+              : location.pathname === to;
+
+            return (
+              <NavLink
+                key={to}
+                to={to}
+                className={[
+                  'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-medium transition-all duration-150',
+                  isActive
+                    ? 'border border-brand-500/20 bg-brand-500/15 text-brand-400'
+                    : 'text-gray-500 hover:bg-dark-600 hover:text-white',
+                ].join(' ')}
+              >
+                <Icon size={18} className="flex-shrink-0" />
+                <span className="truncate">{label}</span>
+              </NavLink>
+            );
+          })}
         </nav>
 
-        {/* User profile + logout */}
         <div className="border-t border-dark-600 p-3">
-          {sidebarOpen ? (
-            <div className="bg-dark-700 rounded-xl p-3 mb-2">
-              <div className="text-sm font-semibold text-white truncate">{user?.name}</div>
-              <div className="text-xs text-gray-500 truncate">{user?.email}</div>
-              <div className="mt-1">
-                <span className="badge bg-brand-500/15 text-brand-400 border border-brand-500/20">
-                  {ROLE_LABELS[user?.role] || user?.role}
-                </span>
-              </div>
-              {user?.franchise_id && (
-                <div className="text-xs text-gray-600 mt-1 truncate">
-                  {user.franchise_id.name}
-                </div>
-              )}
+          <div className="mb-2 rounded-xl bg-dark-700 p-3">
+            <div className="truncate text-sm font-semibold text-white">{user?.name}</div>
+            <div className="truncate text-xs text-gray-500">{user?.email}</div>
+            <div className="mt-1">
+              <span className="badge border border-brand-500/20 bg-brand-500/15 text-brand-400">
+                {ROLE_LABELS[user?.role] || user?.role}
+              </span>
             </div>
-          ) : null}
+            {user?.franchise_id ? (
+              <div className="mt-1 truncate text-xs text-gray-600">{user.franchise_id.name}</div>
+            ) : null}
+          </div>
 
           <button
             onClick={handleLogout}
-            className="flex items-center gap-3 w-full px-3 py-2.5 rounded-xl text-sm text-gray-500 hover:text-red-400 hover:bg-red-500/10 transition-all"
+            className="flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-sm text-gray-500 transition-all hover:bg-red-500/10 hover:text-red-400"
           >
             <LogOut size={18} className="flex-shrink-0" />
-            {sidebarOpen && <span>Sign Out</span>}
+            <span>Sign Out</span>
           </button>
         </div>
       </aside>
 
-      {/* Main content */}
-      <div className="flex-1 flex flex-col overflow-hidden">
-        {/* Top bar */}
-        <header className="h-14 bg-dark-800 border-b border-dark-600 flex items-center px-6 gap-4">
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        <header className="flex h-14 items-center gap-4 border-b border-dark-600 bg-dark-800 px-4 sm:px-6">
           <button
-            onClick={() => setSidebarOpen(!sidebarOpen)}
-            className="text-gray-500 hover:text-white transition-colors"
+            onClick={() => setSidebarOpen((current) => !current)}
+            className="rounded-lg p-2 text-gray-500 transition-colors hover:bg-dark-700 hover:text-white"
+            aria-label="Toggle navigation"
           >
-            {sidebarOpen ? <X size={20} /> : <Menu size={20} />}
+            <Menu size={20} />
           </button>
 
-          <div className="flex-1" />
-
-          <div className="flex items-center gap-2">
-            {user?.franchise_id && (
-              <span className="text-xs text-gray-600 hidden sm:block">
+          <div className="min-w-0 flex-1">
+            <div className="truncate text-sm font-semibold text-white">{ROLE_LABELS[user?.role] || 'Workspace'}</div>
+            {user?.franchise_id ? (
+              <div className="truncate text-xs text-gray-600">
                 {user.franchise_id.franchiseCode} · {user.franchise_id.name}
-              </span>
-            )}
-            <div className="w-8 h-8 bg-brand-500/20 rounded-full flex items-center justify-center text-brand-400 font-bold text-sm">
-              {user?.name?.[0]?.toUpperCase()}
-            </div>
+              </div>
+            ) : null}
+          </div>
+
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/20 text-sm font-bold text-brand-400">
+            {user?.name?.[0]?.toUpperCase()}
           </div>
         </header>
 
-        {/* Page content */}
-        <main className="flex-1 overflow-auto p-6">
+        <main className="flex-1 overflow-auto p-4 sm:p-6">
           <Outlet />
         </main>
       </div>

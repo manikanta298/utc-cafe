@@ -95,9 +95,12 @@ export default function App() {
         {/* POS — full screen */}
         <Route path="/pos" element={
           <ProtectedRoute roles={['pos_staff', 'shift_operator', 'manager', 'franchise_owner']}>
-            <POSScreen />
+            <AppLayout />
           </ProtectedRoute>
-        } />
+        }>
+          <Route index element={<POSScreen mode="billing" embedded />} />
+          <Route path="history" element={<POSScreen mode="history" embedded />} />
+        </Route>
 
         {/* Kitchen — full screen */}
         <Route path="/kitchen" element={
