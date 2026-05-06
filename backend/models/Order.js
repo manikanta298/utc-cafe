@@ -60,6 +60,9 @@ const orderSchema = new mongoose.Schema(
 
     // Points earned from this order
     points_earned: { type: Number, default: 0 },
+
+    // Archived automatically after the operational 30-day window.
+    archivedAt: { type: Date, default: null },
   },
   { timestamps: true }
 );
@@ -67,5 +70,6 @@ const orderSchema = new mongoose.Schema(
 orderSchema.index({ franchise_id: 1, createdAt: -1 });
 orderSchema.index({ customer_id: 1 });
 orderSchema.index({ kitchen_status: 1, franchise_id: 1 });
+orderSchema.index({ archivedAt: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);

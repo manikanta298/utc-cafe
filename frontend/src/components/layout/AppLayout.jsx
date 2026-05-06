@@ -21,6 +21,7 @@ const FRANCHISE_NAV = [
   { to: '/franchise/orders', icon: Receipt, label: 'Orders' },
   { to: '/franchise/menu', icon: UtensilsCrossed, label: 'Menu' },
   { to: '/franchise/staff', icon: Users, label: 'Staff' },
+  { to: '/franchise/invoices', icon: FileText, label: 'Reports' },
   { to: '/pos', icon: Receipt, label: 'POS Billing' },
   { to: '/kitchen', icon: ChefHat, label: 'Kitchen' },
 ];
@@ -29,6 +30,9 @@ const ROLE_LABELS = {
   master_admin: 'Master Admin',
   franchise_owner: 'Franchise Owner',
   manager: 'Manager',
+  pos_staff: 'Shift Operator',
+  shift_operator: 'Shift Operator',
+  kitchen_staff: 'Kitchen Staff',
 };
 
 export default function AppLayout() {

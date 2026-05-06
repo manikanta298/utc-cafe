@@ -32,10 +32,12 @@ export default function FranchisesPage() {
     } catch (err) { toast.error(err.response?.data?.message || 'Error'); }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm('Deactivate this franchise?')) return;
-    await api.delete(`/franchises/${id}`);
-    toast.success('Franchise deactivated'); load();
+  const toggleActive = async (franchise) => {
+    const nextActive = !franchise.isActive;
+    if (!confirm(`${nextActive ? 'Activate' : 'Deactivate'} this franchise?`)) return;
+    await api.put(`/franchises/${franchise._id}`, { isActive: nextActive });
+    toast.success(`Franchise ${nextActive ? 'activated' : 'deactivated'}`);
+    load();
   };
 
   return (
@@ -76,7 +78,9 @@ export default function FranchisesPage() {
 
             <div className="flex gap-2 pt-1">
               <button onClick={() => openEdit(f)} className="btn-ghost flex-1 py-1.5 text-xs">Edit</button>
-              <button onClick={() => handleDelete(f._id)} className="bg-red-500/10 hover:bg-red-500/20 text-red-400 rounded-lg px-3 py-1.5 text-xs transition-colors">Deactivate</button>
+              <button onClick={() => toggleActive(f)} className={`${f.isActive ? 'bg-red-500/10 hover:bg-red-500/20 text-red-400' : 'bg-green-500/10 hover:bg-green-500/20 text-green-400'} rounded-lg px-3 py-1.5 text-xs transition-colors`}>
+                {f.isActive ? 'Deactivate' : 'Activate'}
+              </button>
             </div>
           </div>
         ))}

@@ -12,11 +12,24 @@ const lookupByPhone = async (req, res) => {
     let customer = await Customer.findOne({ phone_no: phone.trim() });
     const isNew = !customer;
 
+    const orderFilter = customer ? { customer_id: customer._id } : null;
+    if (orderFilter && req.user.role !== 'master_admin') {
+      orderFilter.franchise_id = req.user.franchise_id._id || req.user.franchise_id;
+    }
+
+    const recentOrders = orderFilter
+      ? await Order.find(orderFilter)
+          .select('order_number final_amount payment_mode kitchen_status token_number createdAt items')
+          .sort({ createdAt: -1 })
+          .limit(10)
+      : [];
+
     res.json({
       success: true,
       customer: customer || null,
       isNew,
       pointsValue: customer ? calculatePointsValue(customer.total_points) : 0,
+      recentOrders,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -73,12 +86,20 @@ const getCustomerHistory = async (req, res) => {
     const customer = await Customer.findById(req.params.id);
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
 
-    const orders = await Order.find({ customer_id: customer._id })
+    const orderFilter = { customer_id: customer._id };
+    const loyaltyFilter = { customer_id: customer._id };
+    if (req.user.role !== 'master_admin') {
+      const franchiseId = req.user.franchise_id._id || req.user.franchise_id;
+      orderFilter.franchise_id = franchiseId;
+      loyaltyFilter.franchise_id = franchiseId;
+    }
+
+    const orders = await Order.find(orderFilter)
       .populate('franchise_id', 'name franchiseCode city')
       .sort({ createdAt: -1 })
       .limit(50);
 
-    const loyaltyHistory = await Loyalty.find({ customer_id: customer._id })
+    const loyaltyHistory = await Loyalty.find(loyaltyFilter)
       .populate('franchise_id', 'name')
       .sort({ createdAt: -1 })
       .limit(30);

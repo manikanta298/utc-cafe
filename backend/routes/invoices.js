@@ -4,20 +4,39 @@ const router = express.Router();
 const Invoice = require('../models/Invoice');
 const { protect, authorise } = require('../middleware/auth');
 
+const csvEscape = (value) => {
+  const text = value === undefined || value === null ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
+const assertInvoiceAccess = (req, invoice) => {
+  if (req.user.role === 'master_admin') return true;
+  const userFranchise = (req.user.franchise_id._id || req.user.franchise_id).toString();
+  return invoice.franchise_id?._id
+    ? invoice.franchise_id._id.toString() === userFranchise
+    : invoice.franchise_id.toString() === userFranchise;
+};
+
+const buildInvoiceFilter = (req) => {
+  const { franchiseId, month, year } = req.query;
+  const filter = {};
+  if (req.user.role !== 'master_admin') {
+    filter.franchise_id = req.user.franchise_id._id || req.user.franchise_id;
+  } else if (franchiseId) {
+    filter.franchise_id = franchiseId;
+  }
+  if (month && year) {
+    const start = new Date(year, month - 1, 1);
+    const end = new Date(year, month, 1);
+    filter.invoice_date = { $gte: start, $lt: end };
+  }
+  return filter;
+};
+
 router.get('/', protect, async (req, res) => {
   try {
-    const { page = 1, limit = 20, franchiseId, month, year } = req.query;
-    const filter = {};
-    if (req.user.role !== 'master_admin') {
-      filter.franchise_id = req.user.franchise_id._id || req.user.franchise_id;
-    } else if (franchiseId) {
-      filter.franchise_id = franchiseId;
-    }
-    if (month && year) {
-      const start = new Date(year, month - 1, 1);
-      const end = new Date(year, month, 1);
-      filter.invoice_date = { $gte: start, $lt: end };
-    }
+    const { page = 1, limit = 20 } = req.query;
+    const filter = buildInvoiceFilter(req);
     const skip = (page - 1) * limit;
     const [invoices, total] = await Promise.all([
       Invoice.find(filter).populate('franchise_id', 'name franchiseCode').sort({ createdAt: -1 }).skip(skip).limit(Number(limit)),
@@ -29,13 +48,118 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
+router.get('/export.csv', protect, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
+  try {
+    const invoices = await Invoice.find(buildInvoiceFilter(req))
+      .populate('franchise_id', 'name franchiseCode')
+      .sort({ createdAt: -1 })
+      .limit(5000);
+
+    const header = ['Invoice No', 'Date', 'Franchise', 'Customer', 'Phone', 'Taxable', 'CGST', 'SGST', 'IGST', 'Total Tax', 'Discount', 'Final', 'Payment'];
+    const rows = invoices.map((invoice) => [
+      invoice.invoice_no,
+      invoice.invoice_date?.toISOString(),
+      `${invoice.franchise_id?.franchiseCode || ''} ${invoice.franchise_id?.name || ''}`.trim(),
+      invoice.customer_name,
+      invoice.customer_phone,
+      invoice.taxable_amount,
+      invoice.cgst,
+      invoice.sgst,
+      invoice.igst,
+      invoice.total_tax,
+      invoice.discount_amount,
+      invoice.final_amount,
+      invoice.payment_mode,
+    ]);
+
+    const csv = [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="gst-invoices.csv"');
+    res.send(csv);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+});
+
 router.get('/:id', protect, async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id).populate('franchise_id', 'name franchiseCode state gstin');
     if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
+    if (!assertInvoiceAccess(req, invoice)) {
+      return res.status(403).json({ success: false, message: 'Access denied' });
+    }
     res.json({ success: true, invoice });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
+  }
+});
+
+router.get('/:id/receipt', protect, async (req, res) => {
+  try {
+    const invoice = await Invoice.findById(req.params.id).populate('franchise_id', 'name franchiseCode state gstin address phone');
+    if (!invoice) return res.status(404).send('Invoice not found');
+    if (!assertInvoiceAccess(req, invoice)) return res.status(403).send('Access denied');
+
+    const rows = invoice.items.map((item) => `
+      <tr>
+        <td>${item.name || ''}</td>
+        <td>${item.quantity || 0}</td>
+        <td>${Number(item.price || 0).toFixed(2)}</td>
+        <td>${Number(item.item_total || 0).toFixed(2)}</td>
+      </tr>
+    `).join('');
+
+    res.setHeader('Content-Type', 'text/html; charset=utf-8');
+    res.send(`<!doctype html>
+      <html>
+      <head>
+        <title>${invoice.invoice_no}</title>
+        <style>
+          body { font-family: Arial, sans-serif; color: #111; margin: 24px; }
+          .receipt { max-width: 380px; margin: 0 auto; }
+          h1, h2, p { margin: 0; text-align: center; }
+          h1 { font-size: 20px; }
+          h2 { font-size: 14px; margin-top: 4px; }
+          .meta, .totals { margin-top: 14px; font-size: 12px; }
+          table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 12px; }
+          th, td { border-bottom: 1px dashed #aaa; padding: 6px 2px; text-align: left; }
+          td:nth-child(2), td:nth-child(3), td:nth-child(4), th:nth-child(2), th:nth-child(3), th:nth-child(4) { text-align: right; }
+          .line { display: flex; justify-content: space-between; margin: 4px 0; }
+          .final { font-size: 16px; font-weight: 700; border-top: 1px solid #111; padding-top: 8px; }
+          @media print { button { display: none; } body { margin: 0; } }
+        </style>
+      </head>
+      <body>
+        <div class="receipt">
+          <h1>${invoice.franchise_name || invoice.franchise_id?.name || 'UTC Cafe'}</h1>
+          <p>${invoice.franchise_address || invoice.franchise_id?.address || ''}</p>
+          <h2>Tax Invoice</h2>
+          <div class="meta">
+            <div class="line"><span>Invoice</span><strong>${invoice.invoice_no}</strong></div>
+            <div class="line"><span>Date</span><span>${new Date(invoice.invoice_date || invoice.createdAt).toLocaleString('en-IN')}</span></div>
+            <div class="line"><span>Customer</span><span>${invoice.customer_name || ''}</span></div>
+            <div class="line"><span>Mobile</span><span>${invoice.customer_phone || ''}</span></div>
+            <div class="line"><span>GSTIN</span><span>${invoice.franchise_gstin || invoice.franchise_id?.gstin || ''}</span></div>
+          </div>
+          <table>
+            <thead><tr><th>Item</th><th>Qty</th><th>Rate</th><th>Total</th></tr></thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <div class="totals">
+            <div class="line"><span>Taxable</span><span>Rs. ${Number(invoice.taxable_amount || 0).toFixed(2)}</span></div>
+            <div class="line"><span>CGST</span><span>Rs. ${Number(invoice.cgst || 0).toFixed(2)}</span></div>
+            <div class="line"><span>SGST</span><span>Rs. ${Number(invoice.sgst || 0).toFixed(2)}</span></div>
+            <div class="line"><span>IGST</span><span>Rs. ${Number(invoice.igst || 0).toFixed(2)}</span></div>
+            <div class="line"><span>Discount</span><span>Rs. ${Number(invoice.discount_amount || 0).toFixed(2)}</span></div>
+            <div class="line final"><span>Total</span><span>Rs. ${Number(invoice.final_amount || 0).toFixed(2)}</span></div>
+          </div>
+          <p style="margin-top:18px;font-size:12px;">Thank you. Please visit again.</p>
+          <button onclick="window.print()" style="margin-top:16px;width:100%;padding:10px;">Print / Save PDF</button>
+        </div>
+      </body>
+      </html>`);
+  } catch (err) {
+    res.status(500).send(err.message);
   }
 });
 

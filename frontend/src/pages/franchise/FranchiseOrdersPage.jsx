@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Search, RefreshCw } from 'lucide-react';
+import { Download, Printer, RefreshCw } from 'lucide-react';
 import api from '../../lib/api';
 import { format } from 'date-fns';
 
@@ -21,6 +21,28 @@ export default function FranchiseOrdersPage() {
   };
   useEffect(() => { load(); }, [filters]);
 
+  const downloadBlob = (data, type, filename) => {
+    const url = URL.createObjectURL(new Blob([data], { type }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const downloadReport = async () => {
+    const params = new URLSearchParams({ ...filters });
+    const res = await api.get(`/orders/export.csv?${params}`, { responseType: 'blob' });
+    downloadBlob(res.data, 'text/csv', 'orders-report.csv');
+  };
+  const openReceipt = async (orderId) => {
+    const res = await api.get(`/orders/${orderId}`);
+    const invoiceId = res.data.order?.invoice_id || res.data.invoice?._id;
+    if (!invoiceId) return;
+    const receipt = await api.get(`/invoices/${invoiceId}/receipt`, { responseType: 'text' });
+    const url = URL.createObjectURL(new Blob([receipt.data], { type: 'text/html' }));
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
   return (
     <div className="animate-fade-in">
       <div className="page-header">
@@ -28,9 +50,14 @@ export default function FranchiseOrdersPage() {
           <h1 className="section-title">Orders</h1>
           <p className="text-gray-500 text-sm mt-1">{total} total orders</p>
         </div>
-        <button onClick={load} className="btn-ghost flex items-center gap-2 py-2">
-          <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Refresh
-        </button>
+        <div className="flex gap-2">
+          <button onClick={downloadReport} className="btn-ghost flex items-center gap-2 py-2">
+            <Download size={15} /> Download CSV
+          </button>
+          <button onClick={load} className="btn-ghost flex items-center gap-2 py-2">
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} /> Refresh
+          </button>
+        </div>
       </div>
 
       <div className="flex flex-wrap gap-3 mb-6">
@@ -49,11 +76,11 @@ export default function FranchiseOrdersPage() {
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-dark-700/50">
-              <tr>{['Order #', 'Token', 'Customer', 'Items', 'Amount', 'Payment', 'Kitchen', 'Time'].map(h => <th key={h} className="table-head">{h}</th>)}</tr>
+              <tr>{['Order #', 'Token', 'Customer', 'Items', 'Amount', 'Payment', 'Kitchen', 'Time', 'Actions'].map(h => <th key={h} className="table-head">{h}</th>)}</tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={8} className="text-center py-12">
+                <tr><td colSpan={9} className="text-center py-12">
                   <div className="w-6 h-6 border-2 border-brand-500 border-t-transparent rounded-full animate-spin mx-auto" />
                 </td></tr>
               ) : orders.map((order) => (
@@ -83,10 +110,15 @@ export default function FranchiseOrdersPage() {
                   <td className="table-cell text-xs text-gray-600">
                     {order.createdAt ? format(new Date(order.createdAt), 'dd MMM, hh:mm a') : ''}
                   </td>
+                  <td className="table-cell">
+                    <button onClick={() => openReceipt(order._id)} className="text-gray-500 hover:text-brand-400 transition-colors" title="Reprint bill">
+                      <Printer size={15} />
+                    </button>
+                  </td>
                 </tr>
               ))}
               {!loading && !orders.length && (
-                <tr><td colSpan={8} className="text-center py-12 text-gray-600 text-sm">No orders found</td></tr>
+                <tr><td colSpan={9} className="text-center py-12 text-gray-600 text-sm">No orders found</td></tr>
               )}
             </tbody>
           </table>

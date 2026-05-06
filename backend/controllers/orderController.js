@@ -7,6 +7,13 @@ const Loyalty = require('../models/Loyalty');
 const { determineTaxType, calculateOrderTax, calculatePointsEarned, calculatePointsValue } = require('../utils/gst');
 const { sendOrderPlaced } = require('../utils/sms');
 
+const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+const csvEscape = (value) => {
+  const text = value === undefined || value === null ? '' : String(value);
+  return `"${text.replace(/"/g, '""')}"`;
+};
+
 // Generate order number: FR01-ORD-00001
 const generateOrderNumber = async (franchise) => {
   const count = await Order.countDocuments({ franchise_id: franchise._id });
@@ -32,7 +39,9 @@ const createOrder = async (req, res) => {
     } = req.body;
 
     const franchise = await Franchise.findById(req.user.franchise_id);
-    if (!franchise) return res.status(404).json({ success: false, message: 'Franchise not found' });
+    if (!franchise || !franchise.isActive) {
+      return res.status(403).json({ success: false, message: 'Franchise is inactive or not found' });
+    }
 
     const customer = await Customer.findById(customer_id);
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
@@ -44,7 +53,7 @@ const createOrder = async (req, res) => {
       if (!menuItem || !menuItem.isGlobalActive) {
         return res.status(400).json({ success: false, message: `Item not available: ${line.item_id}` });
       }
-      if (menuItem.disabledInFranchises.includes(franchise._id.toString())) {
+      if (menuItem.disabledInFranchises.map(String).includes(franchise._id.toString())) {
         return res.status(400).json({ success: false, message: `Item disabled at this outlet: ${menuItem.name}` });
       }
       orderItems.push({
@@ -202,8 +211,9 @@ const createOrder = async (req, res) => {
 // @GET /api/orders  — List orders (franchise-scoped)
 const getOrders = async (req, res) => {
   try {
-    const { page = 1, limit = 20, status, date, search } = req.query;
+    const { page = 1, limit = 20, status, date, search, includeArchived } = req.query;
     const filter = {};
+    if (includeArchived !== 'true') filter.archivedAt = null;
 
     if (req.user.role !== 'master_admin') {
       filter.franchise_id = req.user.franchise_id._id || req.user.franchise_id;
@@ -212,6 +222,7 @@ const getOrders = async (req, res) => {
     }
 
     if (status) filter.kitchen_status = status;
+    if (search) filter.order_number = { $regex: search, $options: 'i' };
 
     if (date) {
       const d = new Date(date);
@@ -254,10 +265,78 @@ const getOrderById = async (req, res) => {
       }
     }
 
-    res.json({ success: true, order });
+    const invoice = await Invoice.findOne({ order_id: order._id }).select('_id invoice_no');
+
+    res.json({ success: true, order, invoice });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
   }
 };
 
-module.exports = { createOrder, getOrders, getOrderById };
+// @GET /api/orders/export.csv - Download franchise-scoped order report
+const exportOrdersCsv = async (req, res) => {
+  try {
+    const { date, status, includeArchived } = req.query;
+    const filter = {};
+    if (includeArchived !== 'true') filter.archivedAt = null;
+
+    if (req.user.role !== 'master_admin') {
+      filter.franchise_id = req.user.franchise_id._id || req.user.franchise_id;
+    } else if (req.query.franchise_id) {
+      filter.franchise_id = req.query.franchise_id;
+    }
+
+    if (status) filter.kitchen_status = status;
+    if (date) {
+      const d = new Date(date);
+      const nextDay = new Date(d);
+      nextDay.setDate(d.getDate() + 1);
+      filter.createdAt = { $gte: d, $lt: nextDay };
+    }
+
+    const orders = await Order.find(filter)
+      .populate('customer_id', 'name phone_no')
+      .populate('franchise_id', 'name franchiseCode')
+      .sort({ createdAt: -1 })
+      .limit(5000);
+
+    const header = ['Order No', 'Date', 'Franchise', 'Customer', 'Phone', 'Items', 'Payment', 'Kitchen', 'Subtotal', 'Tax', 'Discount', 'Final'];
+    const rows = orders.map((order) => [
+      order.order_number,
+      order.createdAt?.toISOString(),
+      `${order.franchise_id?.franchiseCode || ''} ${order.franchise_id?.name || ''}`.trim(),
+      order.customer_id?.name,
+      order.customer_id?.phone_no,
+      order.items?.map((item) => `${item.name} x ${item.quantity}`).join('; '),
+      order.payment_mode,
+      order.kitchen_status,
+      order.sub_total,
+      order.total_tax,
+      order.discount_amount,
+      order.final_amount,
+    ]);
+
+    const csv = [header, ...rows].map((row) => row.map(csvEscape).join(',')).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', 'attachment; filename="orders-report.csv"');
+    res.send(csv);
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// @POST /api/orders/archive-old - Mark operational orders older than 30 days as archived
+const archiveOldOrders = async (req, res) => {
+  try {
+    const cutoff = new Date(Date.now() - THIRTY_DAYS_MS);
+    const result = await Order.updateMany(
+      { createdAt: { $lt: cutoff }, archivedAt: null },
+      { $set: { archivedAt: new Date() } }
+    );
+    res.json({ success: true, archived: result.modifiedCount || 0, cutoff });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = { createOrder, getOrders, getOrderById, exportOrdersCsv, archiveOldOrders };

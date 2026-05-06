@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const cors = require('cors');
 const morgan = require('morgan');
 require('dotenv').config();
+const Order = require('./models/Order');
 
 const app = express();
 const server = http.createServer(app);
@@ -111,6 +112,10 @@ mongoose
   })
   .then(() => {
     console.log('✓ MongoDB connected');
+    Order.updateMany(
+      { createdAt: { $lt: new Date(Date.now() - 30 * 24 * 60 * 60 * 1000) }, archivedAt: null },
+      { $set: { archivedAt: new Date() } }
+    ).catch((err) => console.error('Order archive job failed:', err.message));
     server.listen(PORT, () => console.log(`✓ Server running on port ${PORT}`));
   })
   .catch((err) => {

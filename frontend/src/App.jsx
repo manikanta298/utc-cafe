@@ -27,6 +27,7 @@ const ROLE_HOME = {
   franchise_owner: '/franchise/dashboard',
   manager:         '/franchise/dashboard',
   pos_staff:       '/pos',
+  shift_operator:  '/pos',
   kitchen_staff:   '/kitchen',
 };
 
@@ -88,11 +89,12 @@ export default function App() {
           <Route path="menu"      element={<FranchiseMenuPage />} />
           <Route path="staff"     element={<FranchiseStaffPage />} />
           <Route path="orders"    element={<FranchiseOrdersPage />} />
+          <Route path="invoices"  element={<MasterInvoicesPage />} />
         </Route>
 
         {/* POS — full screen */}
         <Route path="/pos" element={
-          <ProtectedRoute roles={['pos_staff', 'manager', 'franchise_owner']}>
+          <ProtectedRoute roles={['pos_staff', 'shift_operator', 'manager', 'franchise_owner']}>
             <POSScreen />
           </ProtectedRoute>
         } />

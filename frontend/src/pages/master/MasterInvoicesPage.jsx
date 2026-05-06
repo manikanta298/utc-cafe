@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
-import { FileText, Download } from 'lucide-react';
+import { Download, Printer } from 'lucide-react';
 import api from '../../lib/api';
 import { format } from 'date-fns';
+import useAuthStore from '../../store/authStore';
 
 export default function MasterInvoicesPage() {
+  const { user } = useAuthStore();
   const [invoices, setInvoices] = useState([]);
   const [franchises, setFranchises] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -13,13 +15,34 @@ export default function MasterInvoicesPage() {
   const load = async () => {
     setLoading(true);
     const params = new URLSearchParams({ limit: 50, ...filters });
-    const [inv, fr] = await Promise.all([api.get(`/invoices?${params}`), api.get('/franchises')]);
+    const requests = [api.get(`/invoices?${params}`)];
+    if (user?.role === 'master_admin') requests.push(api.get('/franchises'));
+    const [inv, fr] = await Promise.all(requests);
     setInvoices(inv.data.invoices);
     setTotal(inv.data.total);
-    setFranchises(fr.data.franchises);
+    setFranchises(fr?.data?.franchises || []);
     setLoading(false);
   };
-  useEffect(() => { load(); }, [filters]);
+  useEffect(() => { load(); }, [filters, user?.role]);
+
+  const downloadBlob = (data, type, filename) => {
+    const url = URL.createObjectURL(new Blob([data], { type }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+  const downloadReport = async () => {
+    const params = new URLSearchParams({ ...filters });
+    const res = await api.get(`/invoices/export.csv?${params}`, { responseType: 'blob' });
+    downloadBlob(res.data, 'text/csv', 'gst-invoices.csv');
+  };
+  const openReceipt = async (invoiceId) => {
+    const res = await api.get(`/invoices/${invoiceId}/receipt`, { responseType: 'text' });
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'text/html' }));
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
 
   // GST aggregate
   const gstTotals = invoices.reduce((acc, inv) => ({
@@ -35,17 +58,22 @@ export default function MasterInvoicesPage() {
     <div className="animate-fade-in">
       <div className="page-header">
         <div>
-          <h1 className="section-title">Invoices & GST Reports</h1>
+          <h1 className="section-title">{user?.role === 'master_admin' ? 'Invoices & GST Reports' : 'Franchise Reports'}</h1>
           <p className="text-gray-500 text-sm mt-1">{total} invoices</p>
         </div>
+        <button onClick={downloadReport} className="btn-ghost flex items-center gap-2 py-2">
+          <Download size={15} /> Download CSV
+        </button>
       </div>
 
       {/* Filters */}
       <div className="flex flex-wrap gap-3 mb-6">
-        <select className="input w-48" value={filters.franchiseId} onChange={(e) => setFilters({ ...filters, franchiseId: e.target.value })}>
-          <option value="">All Franchises</option>
-          {franchises.map((f) => <option key={f._id} value={f._id}>{f.name}</option>)}
-        </select>
+        {user?.role === 'master_admin' && (
+          <select className="input w-48" value={filters.franchiseId} onChange={(e) => setFilters({ ...filters, franchiseId: e.target.value })}>
+            <option value="">All Franchises</option>
+            {franchises.map((f) => <option key={f._id} value={f._id}>{f.name}</option>)}
+          </select>
+        )}
         <select className="input w-36" value={filters.month} onChange={(e) => setFilters({ ...filters, month: e.target.value })}>
           <option value="">All Months</option>
           {['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'].map((m, i) => (
@@ -77,10 +105,10 @@ export default function MasterInvoicesPage() {
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead className="bg-dark-700/50">
-              <tr>{['Invoice No', 'Date', 'Franchise', 'Customer', 'Taxable', 'CGST', 'SGST', 'IGST', 'Tax', 'Final'].map(h => <th key={h} className="table-head">{h}</th>)}</tr>
+              <tr>{['Invoice No', 'Date', 'Franchise', 'Customer', 'Taxable', 'CGST', 'SGST', 'IGST', 'Tax', 'Final', 'Actions'].map(h => <th key={h} className="table-head">{h}</th>)}</tr>
             </thead>
             <tbody>
-              {loading ? <tr><td colSpan={10} className="text-center py-8 text-gray-600">Loading...</td></tr>
+              {loading ? <tr><td colSpan={11} className="text-center py-8 text-gray-600">Loading...</td></tr>
               : invoices.map((inv) => (
                 <tr key={inv._id} className="table-row">
                   <td className="table-cell font-mono text-brand-400 text-xs">{inv.invoice_no}</td>
@@ -93,6 +121,11 @@ export default function MasterInvoicesPage() {
                   <td className="table-cell font-mono text-xs text-purple-400">₹{inv.igst?.toFixed(2)}</td>
                   <td className="table-cell font-mono text-xs text-orange-400">₹{inv.total_tax?.toFixed(2)}</td>
                   <td className="table-cell font-mono text-xs text-green-400 font-bold">₹{inv.final_amount?.toFixed(2)}</td>
+                  <td className="table-cell">
+                    <button onClick={() => openReceipt(inv._id)} className="text-gray-500 hover:text-brand-400 transition-colors" title="Print receipt">
+                      <Printer size={15} />
+                    </button>
+                  </td>
                 </tr>
               ))}
             </tbody>

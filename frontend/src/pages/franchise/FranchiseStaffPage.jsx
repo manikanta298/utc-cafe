@@ -5,6 +5,12 @@ import api from '../../lib/api';
 import toast from 'react-hot-toast';
 
 const STAFF_ROLES = ['manager', 'pos_staff', 'kitchen_staff'];
+const ROLE_LABELS = {
+  manager: 'Manager',
+  pos_staff: 'Shift Operator',
+  shift_operator: 'Shift Operator',
+  kitchen_staff: 'Kitchen Staff',
+};
 const ROLE_COLORS = {
   manager: 'bg-teal-500/10 text-teal-400',
   pos_staff: 'bg-green-500/10 text-green-400',
@@ -73,7 +79,7 @@ export default function FranchiseStaffPage() {
             {s.phone && <div className="text-xs text-gray-600 mb-2">{s.phone}</div>}
             <div className="flex items-center justify-between mt-3">
               <span className={`badge ${ROLE_COLORS[s.role] || 'bg-gray-500/10 text-gray-400'}`}>
-                {s.role.replace('_', ' ')}
+                {ROLE_LABELS[s.role] || s.role.replace('_', ' ')}
               </span>
               <button onClick={() => toggleActive(s._id)}
                 className={`p-1.5 rounded-lg transition-colors ${s.isActive ? 'text-red-400 hover:bg-red-500/10' : 'text-green-400 hover:bg-green-500/10'}`}>
@@ -106,7 +112,7 @@ export default function FranchiseStaffPage() {
               <div>
                 <label className="label">Role</label>
                 <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                  {STAFF_ROLES.map((r) => <option key={r} value={r}>{r.replace('_', ' ')}</option>)}
+                  {STAFF_ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r] || r.replace('_', ' ')}</option>)}
                 </select>
               </div>
               <div className="flex gap-3 pt-2">

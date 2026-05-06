@@ -5,6 +5,14 @@ import api from '../../lib/api';
 import toast from 'react-hot-toast';
 
 const ROLES = ['franchise_owner', 'manager', 'pos_staff', 'kitchen_staff'];
+const ROLE_LABELS = {
+  master_admin: 'Master Admin',
+  franchise_owner: 'Franchise Owner',
+  manager: 'Manager',
+  pos_staff: 'Shift Operator',
+  shift_operator: 'Shift Operator',
+  kitchen_staff: 'Kitchen Staff',
+};
 const ROLE_COLORS = {
   master_admin: 'bg-purple-500/10 text-purple-400',
   franchise_owner: 'bg-blue-500/10 text-blue-400',
@@ -73,7 +81,7 @@ export function MasterStaffPage() {
                 <tr key={s._id} className="table-row">
                   <td className="table-cell font-medium text-white">{s.name}</td>
                   <td className="table-cell text-gray-500">{s.email}</td>
-                  <td className="table-cell"><span className={`badge ${ROLE_COLORS[s.role]}`}>{s.role.replace('_', ' ')}</span></td>
+                  <td className="table-cell"><span className={`badge ${ROLE_COLORS[s.role]}`}>{ROLE_LABELS[s.role] || s.role.replace('_', ' ')}</span></td>
                   <td className="table-cell">{s.franchise_id?.name || '—'}</td>
                   <td className="table-cell">
                     <span className={`badge ${s.isActive ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
@@ -115,7 +123,7 @@ export function MasterStaffPage() {
               <div>
                 <label className="label">Role</label>
                 <select className="input" value={form.role} onChange={(e) => setForm({ ...form, role: e.target.value })}>
-                  {ROLES.map((r) => <option key={r} value={r}>{r.replace('_', ' ')}</option>)}
+                  {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABELS[r] || r.replace('_', ' ')}</option>)}
                 </select>
               </div>
               <div>

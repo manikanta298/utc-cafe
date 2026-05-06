@@ -30,6 +30,7 @@ export default function POSScreen() {
   const [customerLoading, setCustomerLoading] = useState(false);
   const [newCustName, setNewCustName] = useState('');
   const [isNewCustomer, setIsNewCustomer] = useState(false);
+  const [recentOrders, setRecentOrders] = useState([]);
 
   // Cart
   const [cart, setCart] = useState([]);
@@ -56,6 +57,31 @@ export default function POSScreen() {
     }
   }, [franchiseId]);
 
+  // Keep POS availability in sync when owner/manager marks items out of stock.
+  useEffect(() => {
+    if (!franchiseId) return undefined;
+    const socket = getSocket();
+
+    const handleMenuAvailability = ({ itemId, isEnabled, item }) => {
+      setMenuItems((prev) => {
+        if (isEnabled) {
+          const exists = prev.some((menuItem) => menuItem._id === itemId);
+          return exists ? prev.map((menuItem) => menuItem._id === itemId ? item : menuItem) : [...prev, item];
+        }
+        return prev.filter((menuItem) => menuItem._id !== itemId);
+      });
+
+      if (!isEnabled) {
+        setCart((prev) => prev.filter((cartItem) => cartItem.item_id !== itemId));
+      }
+
+      toast(isEnabled ? `${item?.name || 'Item'} is back in stock` : `${item?.name || 'Item'} marked out of stock`);
+    };
+
+    socket.on('menu:availability', handleMenuAvailability);
+    return () => socket.off('menu:availability', handleMenuAvailability);
+  }, [franchiseId]);
+
   // Load menu
   useEffect(() => {
     const load = async () => {
@@ -75,10 +101,12 @@ export default function POSScreen() {
       const res = await api.get(`/customers/lookup?phone=${phone}`);
       if (res.data.customer) {
         setCustomer(res.data.customer);
+        setRecentOrders(res.data.recentOrders || []);
         setIsNewCustomer(false);
         setNewCustName('');
       } else {
         setCustomer(null);
+        setRecentOrders([]);
         setIsNewCustomer(true);
       }
     } catch { toast.error('Lookup failed'); }
@@ -87,7 +115,7 @@ export default function POSScreen() {
 
   useEffect(() => {
     if (phone.length === 10) lookupCustomer();
-    else { setCustomer(null); setIsNewCustomer(false); }
+    else { setCustomer(null); setRecentOrders([]); setIsNewCustomer(false); }
   }, [phone]);
 
   // Cart operations
@@ -108,6 +136,7 @@ export default function POSScreen() {
   const clearCart = () => {
     setCart([]);
     setCustomer(null);
+    setRecentOrders([]);
     setPhone('');
     setNewCustName('');
     setIsNewCustomer(false);
@@ -116,6 +145,12 @@ export default function POSScreen() {
     setPaymentMode('Cash');
     setStep('menu');
     setOrderResult(null);
+  };
+
+  const openReceipt = async (invoiceId) => {
+    const res = await api.get(`/invoices/${invoiceId}/receipt`, { responseType: 'text' });
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'text/html' }));
+    window.open(url, '_blank', 'noopener,noreferrer');
   };
 
   // Calculations
@@ -201,7 +236,7 @@ export default function POSScreen() {
 
           <div className="flex gap-3">
             <button onClick={clearCart} className="btn-primary flex-1">New Order</button>
-            <button onClick={() => window.print()} className="btn-ghost flex items-center gap-2 px-4">
+            <button onClick={() => openReceipt(invoice._id)} className="btn-ghost flex items-center gap-2 px-4">
               <Printer size={16} />
             </button>
           </div>
@@ -241,7 +276,7 @@ export default function POSScreen() {
               className="input flex-1 py-2 text-sm"
               placeholder="Enter customer phone number..."
               value={phone}
-              onChange={(e) => setPhone(e.target.value.replace(/\D/, '').slice(0, 10))}
+              onChange={(e) => setPhone(e.target.value.replace(/\D/g, '').slice(0, 10))}
               maxLength={10}
             />
             {customerLoading && <div className="w-5 h-5 border-2 border-brand-500 border-t-transparent rounded-full animate-spin" />}
@@ -263,6 +298,17 @@ export default function POSScreen() {
               </div>
             )}
           </div>
+
+          {customer && recentOrders.length > 0 && (
+            <div className="bg-dark-800 border-b border-dark-600 px-5 py-2 flex gap-2 overflow-x-auto text-xs">
+              <span className="text-gray-600 flex-shrink-0">Customer history:</span>
+              {recentOrders.slice(0, 5).map((order) => (
+                <span key={order._id} className="badge bg-dark-700 text-gray-400 border-dark-500 flex-shrink-0">
+                  {order.order_number} · Rs.{Number(order.final_amount || 0).toFixed(0)}
+                </span>
+              ))}
+            </div>
+          )}
 
           {/* Category tabs */}
           <div className="bg-dark-800 border-b border-dark-600 px-5 py-2 flex gap-2 overflow-x-auto scrollbar-hide">

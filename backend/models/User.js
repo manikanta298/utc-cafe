@@ -8,7 +8,7 @@ const userSchema = new mongoose.Schema(
     password: { type: String, required: true, minlength: 6 },
     role: {
       type: String,
-      enum: ['master_admin', 'franchise_owner', 'manager', 'pos_staff', 'kitchen_staff'],
+      enum: ['master_admin', 'franchise_owner', 'manager', 'pos_staff', 'shift_operator', 'kitchen_staff'],
       required: true,
     },
     // franchise_id is null for master_admin, set for all others

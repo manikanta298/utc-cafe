@@ -46,9 +46,9 @@ const createStaff = async (req, res) => {
 
     // Permission matrix
     const allowed = {
-      master_admin: ['master_admin', 'franchise_owner', 'manager', 'pos_staff', 'kitchen_staff'],
-      franchise_owner: ['manager', 'pos_staff', 'kitchen_staff'],
-      manager: ['pos_staff', 'kitchen_staff'],
+      master_admin: ['master_admin', 'franchise_owner', 'manager', 'pos_staff', 'shift_operator', 'kitchen_staff'],
+      franchise_owner: ['manager', 'pos_staff', 'shift_operator', 'kitchen_staff'],
+      manager: ['pos_staff', 'shift_operator', 'kitchen_staff'],
     };
 
     if (!allowed[req.user.role] || !allowed[req.user.role].includes(role)) {
@@ -68,7 +68,7 @@ const createStaff = async (req, res) => {
       name,
       email,
       password,
-      role,
+      role: role === 'shift_operator' ? 'pos_staff' : role,
       phone,
       franchise_id: role === 'master_admin' ? null : assignedFranchise,
     });

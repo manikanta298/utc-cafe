@@ -24,7 +24,11 @@ const protect = async (req, res, next) => {
 
 // Role-based access control factory
 const authorise = (...roles) => (req, res, next) => {
-  if (!roles.includes(req.user.role)) {
+  const requestedRoles = roles.includes('pos_staff')
+    ? [...roles, 'shift_operator']
+    : roles;
+
+  if (!requestedRoles.includes(req.user.role)) {
     return res.status(403).json({
       success: false,
       message: `Role '${req.user.role}' is not permitted for this action`,

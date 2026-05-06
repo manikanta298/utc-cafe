@@ -25,7 +25,8 @@ const getMenu = async (req, res) => {
 // @GET /api/menu/all  — Master Admin — all items including inactive
 const getAllMenu = async (req, res) => {
   try {
-    const items = await MenuItem.find().sort({ category: 1, sortOrder: 1 });
+    const filter = req.user.role === 'master_admin' ? {} : { isGlobalActive: true };
+    const items = await MenuItem.find(filter).sort({ category: 1, sortOrder: 1, name: 1 });
     res.json({ success: true, items });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -122,6 +123,12 @@ const toggleFranchiseItem = async (req, res) => {
     }
     await item.save();
     const isEnabled = !item.disabledInFranchises.map(String).includes(franchiseId);
+    const io = req.app.get('io');
+    io.to(`franchise:${franchiseId}`).to(`pos:${franchiseId}`).emit('menu:availability', {
+      itemId: item._id,
+      isEnabled,
+      item,
+    });
     res.json({ success: true, item, isEnabled });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
