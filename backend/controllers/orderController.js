@@ -14,6 +14,8 @@ const csvEscape = (value) => {
   return `"${text.replace(/"/g, '""')}"`;
 };
 
+const formatCurrency = (value) => `Rs. ${Number(value || 0).toFixed(2)}`;
+
 // Generate order number: FR01-ORD-00001
 const generateOrderNumber = async (franchise) => {
   const count = await Order.countDocuments({ franchise_id: franchise._id });
@@ -119,6 +121,10 @@ const createOrder = async (req, res) => {
     customer.total_points = customer.total_points - pointsRedeemed + pointsEarned;
     customer.total_orders += 1;
     customer.total_spent += finalAmount;
+    customer.last_visit = new Date();
+    const favoriteItems = new Set(customer.favorite_items || []);
+    orderItems.forEach((item) => favoriteItems.add(item.name));
+    customer.favorite_items = [...favoriteItems].slice(0, 20);
     await customer.save();
 
     // Record loyalty transactions
@@ -339,4 +345,94 @@ const archiveOldOrders = async (req, res) => {
   }
 };
 
-module.exports = { createOrder, getOrders, getOrderById, exportOrdersCsv, archiveOldOrders };
+// @GET /api/orders/history
+const getOrderHistory = async (req, res) => {
+  try {
+    const { mobile, orderId, date, customerId, days = 30 } = req.query;
+    const filter = {};
+
+    if (req.user.role !== 'master_admin') {
+      filter.franchise_id = req.user.franchise_id._id || req.user.franchise_id;
+    } else if (req.query.franchise_id) {
+      filter.franchise_id = req.query.franchise_id;
+    }
+
+    if (orderId) {
+      filter.$or = [
+        { order_number: { $regex: orderId, $options: 'i' } },
+        { _id: orderId.match(/^[0-9a-fA-F]{24}$/) ? orderId : null },
+      ].filter((value) => value);
+    }
+
+    if (customerId) {
+      filter.customer_id = customerId;
+    }
+
+    if (mobile) {
+      const customer = await Customer.findOne({ phone_no: mobile.trim() }).select('_id');
+      if (!customer) {
+        return res.json({
+          success: true,
+          orders: [],
+          summary: { totalVisits: 0, totalSpent: 0, averageOrderValue: 0 },
+          customer: null,
+        });
+      }
+      filter.customer_id = customer._id;
+    }
+
+    if (date) {
+      const start = new Date(date);
+      const end = new Date(start);
+      end.setDate(end.getDate() + 1);
+      filter.createdAt = { $gte: start, $lt: end };
+    } else if ((mobile || customerId) && !orderId) {
+      const cutoff = new Date(Date.now() - Number(days) * 24 * 60 * 60 * 1000);
+      filter.createdAt = { $gte: cutoff };
+    }
+
+    const orders = await Order.find(filter)
+      .populate('customer_id', 'name phone_no total_points total_orders total_spent city gender age last_visit')
+      .populate('franchise_id', 'name franchiseCode')
+      .sort({ createdAt: -1 })
+      .limit(100)
+      .lean();
+
+    const orderIds = orders.map((order) => order._id);
+    const invoices = orderIds.length
+      ? await Invoice.find({ order_id: { $in: orderIds } })
+        .select('_id order_id invoice_no invoice_date final_amount payment_mode')
+        .lean()
+      : [];
+    const invoiceMap = new Map(invoices.map((invoice) => [String(invoice.order_id), invoice]));
+
+    const hydratedOrders = orders.map((order) => ({
+      ...order,
+      invoice: invoiceMap.get(String(order._id)) || null,
+    }));
+
+    const totalSpent = hydratedOrders.reduce((sum, order) => sum + Number(order.final_amount || 0), 0);
+    const summary = {
+      totalVisits: hydratedOrders.length,
+      totalSpent,
+      averageOrderValue: hydratedOrders.length ? totalSpent / hydratedOrders.length : 0,
+      activity: hydratedOrders.slice(0, 10).map((order) => ({
+        id: order._id,
+        title: order.order_number,
+        date: order.createdAt,
+        description: `${formatCurrency(order.final_amount)} · ${order.payment_mode} · ${order.kitchen_status}`,
+      })),
+    };
+
+    res.json({
+      success: true,
+      orders: hydratedOrders,
+      summary,
+      customer: hydratedOrders[0]?.customer_id || null,
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+module.exports = { createOrder, getOrders, getOrderHistory, getOrderById, exportOrdersCsv, archiveOldOrders };

@@ -20,6 +20,7 @@ import {
   CalendarDays,
   IndianRupee,
   RefreshCw,
+  Filter,
 } from 'lucide-react';
 import { format } from 'date-fns';
 import toast from 'react-hot-toast';
@@ -79,14 +80,20 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   const [customer, setCustomer] = useState(null);
   const [customerLoading, setCustomerLoading] = useState(false);
   const [newCustName, setNewCustName] = useState('');
+  const [newCustGender, setNewCustGender] = useState('');
+  const [newCustAge, setNewCustAge] = useState('');
+  const [newCustCity, setNewCustCity] = useState('');
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [recentOrders, setRecentOrders] = useState([]);
   const [customerInsights, setCustomerInsights] = useState(emptyInsights);
 
   const [historySearch, setHistorySearch] = useState('');
   const [historyLoading, setHistoryLoading] = useState(false);
+  const [historyModeFilter, setHistoryModeFilter] = useState('mobile');
   const [historyCustomer, setHistoryCustomer] = useState(null);
   const [historyInsights, setHistoryInsights] = useState(emptyInsights);
+  const [historyOrders, setHistoryOrders] = useState([]);
+  const [historySummary, setHistorySummary] = useState({ totalVisits: 0, totalSpent: 0, averageOrderValue: 0 });
 
   const [cart, setCart] = useState([]);
   const [redeemPoints, setRedeemPoints] = useState(false);
@@ -172,11 +179,18 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
       setCustomerInsights(insights);
       setIsNewCustomer(false);
       setNewCustName('');
+      setNewCustGender(payload.customer.gender || '');
+      setNewCustAge(payload.customer.age || '');
+      setNewCustCity(payload.customer.city || '');
+      toast.success(`Welcome back, ${payload.customer.name}!`);
     } else {
       setCustomer(null);
       setRecentOrders([]);
       setCustomerInsights(emptyInsights);
       setIsNewCustomer(Boolean(payload.isNew));
+      setNewCustGender('');
+      setNewCustAge('');
+      setNewCustCity('');
     }
   };
 
@@ -256,6 +270,9 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
     setCustomerInsights(emptyInsights);
     setPhone('');
     setNewCustName('');
+    setNewCustGender('');
+    setNewCustAge('');
+    setNewCustCity('');
     setIsNewCustomer(false);
     setRedeemPoints(false);
     setPointsToRedeem(0);
@@ -311,7 +328,13 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
           setPlacing(false);
           return;
         }
-        const createRes = await api.post('/customers', { phone_no: phone, name: newCustName });
+        const createRes = await api.post('/customers', {
+          mobile: phone,
+          name: newCustName,
+          gender: newCustGender,
+          age: newCustAge,
+          city: newCustCity,
+        });
         customerId = createRes.data.customer._id;
       }
 
@@ -334,6 +357,100 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
 
   const historyPhone = historySearch.trim().replace(/\D/g, '').slice(0, 10);
   const showShellHeader = !embedded;
+
+  const searchHistory = async () => {
+    if (!historySearch.trim()) return;
+
+    setHistoryLoading(true);
+    try {
+      if (historyModeFilter === 'mobile') {
+        const [lookupRes, historyRes] = await Promise.all([
+          api.get(`/customers/lookup?mobile=${historyPhone}`),
+          api.get(`/orders/history?mobile=${historyPhone}`),
+        ]);
+        applyLookupPayload(lookupRes.data, 'history');
+        setHistoryOrders(historyRes.data.orders || []);
+        setHistorySummary(historyRes.data.summary || { totalVisits: 0, totalSpent: 0, averageOrderValue: 0 });
+      } else if (historyModeFilter === 'orderId') {
+        const res = await api.get(`/orders/history?orderId=${encodeURIComponent(historySearch.trim())}`);
+        setHistoryCustomer(res.data.customer || null);
+        setHistoryOrders(res.data.orders || []);
+        setHistorySummary(res.data.summary || { totalVisits: 0, totalSpent: 0, averageOrderValue: 0 });
+        setHistoryInsights(emptyInsights);
+      } else {
+        const res = await api.get(`/orders/history?date=${encodeURIComponent(historySearch.trim())}`);
+        setHistoryCustomer(res.data.customer || null);
+        setHistoryOrders(res.data.orders || []);
+        setHistorySummary(res.data.summary || { totalVisits: 0, totalSpent: 0, averageOrderValue: 0 });
+        setHistoryInsights(emptyInsights);
+      }
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to load order history');
+      setHistoryCustomer(null);
+      setHistoryOrders([]);
+      setHistorySummary({ totalVisits: 0, totalSpent: 0, averageOrderValue: 0 });
+      setHistoryInsights(emptyInsights);
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  const renderHistoryOrders = () => (
+    <div className="card overflow-hidden">
+      <div className="border-b border-dark-600 px-4 py-3">
+        <div className="flex items-center gap-2 text-sm font-semibold text-white">
+          <Receipt size={16} className="text-brand-400" />
+          Order Results
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-dark-700/50">
+            <tr>
+              {['Order', 'Date', 'Items', 'Amount', 'Payment', 'Actions'].map((heading) => (
+                <th key={heading} className="table-head">{heading}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {historyOrders.length ? historyOrders.map((order) => (
+              <tr key={order._id} className="table-row">
+                <td className="table-cell font-mono text-brand-400 text-xs">{order.order_number}</td>
+                <td className="table-cell text-sm text-gray-300">{order.createdAt ? format(new Date(order.createdAt), 'dd MMM yyyy, hh:mm a') : ''}</td>
+                <td className="table-cell text-sm text-gray-400">{order.items?.map((item) => `${item.name} x${item.quantity}`).join(', ')}</td>
+                <td className="table-cell font-semibold text-green-400">{formatMoney(order.final_amount)}</td>
+                <td className="table-cell">
+                  <span className="badge bg-dark-700 text-gray-300 border border-dark-500">{order.payment_status || order.payment_mode}</span>
+                </td>
+                <td className="table-cell">
+                  <div className="flex items-center gap-2">
+                    {order.invoice ? (
+                      <>
+                        <button onClick={() => openReceipt(order.invoice._id)} className="btn-ghost px-3 py-2 text-xs flex items-center gap-2">
+                          <Printer size={14} />
+                          Reprint
+                        </button>
+                        <button onClick={() => downloadReceiptPdf(order.invoice._id, order.invoice.invoice_no)} className="btn-ghost px-3 py-2 text-xs flex items-center gap-2">
+                          <Download size={14} />
+                          PDF
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-xs text-gray-600">No invoice</span>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            )) : (
+              <tr>
+                <td colSpan={6} className="px-4 py-10 text-center text-sm text-gray-600">No order history found.</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
 
   const renderInsights = (insights, activeCustomer, compact = false) => (
     <div className="space-y-4">
@@ -523,51 +640,105 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
 
         <div className="card p-4 sm:p-5">
           <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+            <div className="flex gap-2 overflow-x-auto">
+              {[
+                { key: 'mobile', label: 'Mobile' },
+                { key: 'orderId', label: 'Order ID' },
+                { key: 'date', label: 'Date' },
+              ].map((option) => (
+                <button
+                  key={option.key}
+                  onClick={() => { setHistoryModeFilter(option.key); setHistorySearch(''); setHistoryOrders([]); setHistoryCustomer(null); }}
+                  className={`btn-ghost px-3 py-2 text-xs ${historyModeFilter === option.key ? 'bg-brand-500/20 text-brand-400 border border-brand-500/30' : ''}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
             <div className="relative flex-1">
-              <Phone size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+              <Filter size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
               <input
                 className="input pl-9"
-                placeholder="Enter 10-digit mobile number"
+                placeholder={historyModeFilter === 'mobile' ? 'Enter 10-digit mobile number' : historyModeFilter === 'orderId' ? 'Enter order ID' : 'YYYY-MM-DD'}
                 value={historySearch}
-                onChange={(e) => setHistorySearch(e.target.value.replace(/\D/g, '').slice(0, 10))}
-                maxLength={10}
+                onChange={(e) => setHistorySearch(historyModeFilter === 'mobile' ? e.target.value.replace(/\D/g, '').slice(0, 10) : e.target.value)}
+                maxLength={historyModeFilter === 'mobile' ? 10 : undefined}
               />
             </div>
             <button
-              onClick={() => lookupCustomerByPhone(historyPhone, 'history')}
-              disabled={historyPhone.length < 10 || historyLoading}
+              onClick={searchHistory}
+              disabled={(historyModeFilter === 'mobile' ? historyPhone.length < 10 : !historySearch.trim()) || historyLoading}
               className="btn-primary flex items-center justify-center gap-2 px-5"
             >
               {historyLoading ? <RefreshCw size={16} className="animate-spin" /> : <Search size={16} />}
-              Search Bills
+              Search History
             </button>
           </div>
         </div>
 
-        {historyCustomer ? (
+        {historyCustomer || historyOrders.length ? (
           <div className="space-y-6">
-            <div className="card p-5">
-              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div>
-                  <div className="flex items-center gap-2 text-white">
-                    <User size={16} className="text-brand-400" />
-                    <span className="text-lg font-semibold">{historyCustomer.name}</span>
+            {historyCustomer ? (
+              <div className="card p-5">
+                <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2 text-white">
+                      <User size={16} className="text-brand-400" />
+                      <span className="text-lg font-semibold">{historyCustomer.name}</span>
+                    </div>
+                    <div className="mt-1 text-sm text-gray-500">{historyCustomer.phone_no}</div>
+                    <div className="mt-1 text-xs text-gray-600">
+                      {[historyCustomer.gender, historyCustomer.age ? `${historyCustomer.age} yrs` : '', historyCustomer.city].filter(Boolean).join(' · ')}
+                    </div>
                   </div>
-                  <div className="mt-1 text-sm text-gray-500">{historyCustomer.phone_no}</div>
+                  <div className="flex flex-wrap gap-3">
+                    <span className="badge border border-brand-500/20 bg-brand-500/15 text-brand-400">{historyCustomer.total_orders} visits</span>
+                    <span className="badge border border-yellow-500/20 bg-yellow-500/10 text-yellow-400">{historyCustomer.total_points} pts</span>
+                  </div>
                 </div>
-                <div className="flex flex-wrap gap-3">
-                  <span className="badge border border-brand-500/20 bg-brand-500/15 text-brand-400">{historyCustomer.total_orders} orders</span>
-                  <span className="badge border border-yellow-500/20 bg-yellow-500/10 text-yellow-400">{historyCustomer.total_points} pts</span>
-                </div>
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="card p-4">
+                <div className="text-xs uppercase tracking-wide text-gray-500">Visits</div>
+                <div className="mt-2 text-2xl font-bold text-white">{historySummary.totalVisits}</div>
+              </div>
+              <div className="card p-4">
+                <div className="text-xs uppercase tracking-wide text-gray-500">Total Spent</div>
+                <div className="mt-2 text-2xl font-bold text-brand-400">{formatMoney(historySummary.totalSpent)}</div>
+              </div>
+              <div className="card p-4">
+                <div className="text-xs uppercase tracking-wide text-gray-500">Avg Order</div>
+                <div className="mt-2 text-2xl font-bold text-green-400">{formatMoney(historySummary.averageOrderValue)}</div>
               </div>
             </div>
 
-            {renderInsights(historyInsights, historyCustomer)}
-            {renderPreviousBills(historyInsights)}
+            {historyModeFilter === 'mobile' && historyCustomer ? (
+              <>
+                {renderInsights(historyInsights, historyCustomer)}
+                {renderPreviousBills(historyInsights)}
+              </>
+            ) : (
+              <div className="space-y-6">
+                {renderHistoryOrders()}
+                {historyCustomer && historyModeFilter !== 'mobile' ? (
+                  <div className="card p-5">
+                    <div className="text-sm font-semibold text-white mb-3">Customer snapshot</div>
+                    <div className="grid gap-3 sm:grid-cols-2 text-sm">
+                      <div className="text-gray-400">Name: <span className="text-white">{historyCustomer.name}</span></div>
+                      <div className="text-gray-400">Mobile: <span className="text-white">{historyCustomer.phone_no}</span></div>
+                      <div className="text-gray-400">City: <span className="text-white">{historyCustomer.city || 'NA'}</span></div>
+                      <div className="text-gray-400">Last Visit: <span className="text-white">{historyCustomer.last_visit ? format(new Date(historyCustomer.last_visit), 'dd MMM yyyy') : 'NA'}</span></div>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
           </div>
         ) : (
           <div className="card px-6 py-14 text-center text-sm text-gray-600">
-            Enter a customer mobile number to view previous bills, activity, and spending history.
+            Search by mobile number, order ID, or date to view history, bills, and customer activity.
           </div>
         )}
       </div>
@@ -624,12 +795,34 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
                 ) : null}
 
                 {isNewCustomer && phone.length === 10 ? (
-                  <input
-                    className="input w-full py-2 text-sm xl:w-56"
-                    placeholder="New customer name"
-                    value={newCustName}
-                    onChange={(e) => setNewCustName(e.target.value)}
-                  />
+                  <div className="grid w-full gap-2 md:grid-cols-4 xl:w-auto">
+                    <input
+                      className="input py-2 text-sm"
+                      placeholder="New customer name"
+                      value={newCustName}
+                      onChange={(e) => setNewCustName(e.target.value)}
+                    />
+                    <select className="input py-2 text-sm" value={newCustGender} onChange={(e) => setNewCustGender(e.target.value)}>
+                      <option value="">Gender</option>
+                      <option value="male">Male</option>
+                      <option value="female">Female</option>
+                      <option value="other">Other</option>
+                    </select>
+                    <input
+                      className="input py-2 text-sm"
+                      placeholder="Age"
+                      type="number"
+                      min="0"
+                      value={newCustAge}
+                      onChange={(e) => setNewCustAge(e.target.value)}
+                    />
+                    <input
+                      className="input py-2 text-sm"
+                      placeholder="City"
+                      value={newCustCity}
+                      onChange={(e) => setNewCustCity(e.target.value)}
+                    />
+                  </div>
                 ) : null}
               </div>
 
