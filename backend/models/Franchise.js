@@ -12,20 +12,32 @@ const franchiseSchema = new mongoose.Schema(
     address: { type: String, trim: true },
     owner_id: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
     isActive: { type: Boolean, default: true },
-    // Invoice sequence counter per franchise
+    status: { type: String, enum: ['active', 'inactive', 'archived'], default: 'active' },
+    archivedAt: { type: Date, default: null },
+    deletedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', default: null },
     invoiceCounter: { type: Number, default: 0 },
-    // Franchise code for invoice numbering e.g. FR01
     franchiseCode: { type: String, unique: true, uppercase: true },
-    logo: { type: String, default: '' }, // Cloudinary URL
+    logo: { type: String, default: '' },
   },
   { timestamps: true }
 );
 
-// Auto-generate franchise code before save
 franchiseSchema.pre('save', async function (next) {
-  if (this.franchiseCode) return next();
-  const count = await mongoose.model('Franchise').countDocuments();
-  this.franchiseCode = `FR${String(count + 1).padStart(2, '0')}`;
+  if (!this.franchiseCode) {
+    const count = await mongoose.model('Franchise').countDocuments();
+    this.franchiseCode = `FR${String(count + 1).padStart(2, '0')}`;
+  }
+
+  if (this.status === 'active') {
+    this.isActive = true;
+    this.archivedAt = null;
+  } else if (this.status === 'inactive') {
+    this.isActive = false;
+  } else if (this.status === 'archived') {
+    this.isActive = false;
+    if (!this.archivedAt) this.archivedAt = new Date();
+  }
+
   next();
 });
 

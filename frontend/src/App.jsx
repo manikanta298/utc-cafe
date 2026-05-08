@@ -17,6 +17,7 @@ import FranchiseStaffPage from './pages/franchise/FranchiseStaffPage';
 import FranchiseOrdersPage from './pages/franchise/FranchiseOrdersPage';
 import POSScreen from './pages/pos/POSScreen';
 import KitchenScreen from './pages/kitchen/KitchenScreen';
+import UnauthorizedPage from './pages/UnauthorizedPage';
 
 // Layouts
 import AppLayout from './components/layout/AppLayout';
@@ -63,6 +64,7 @@ export default function App() {
         <Route path="/login" element={
           user ? <Navigate to={ROLE_HOME[user.role] || '/'} replace /> : <LoginPage />
         } />
+        <Route path="/unauthorized" element={<UnauthorizedPage />} />
 
         {/* Root redirect */}
         <Route path="/" element={

@@ -5,7 +5,7 @@ const useAuthStore = create((set, get) => ({
   user: null,
   token: localStorage.getItem('utc_token') || null,
   loading: false,
-  initializing: true,  // true until fetchMe resolves — prevents flash redirect to /login
+  initializing: true,
   error: null,
 
   login: async (email, password) => {
@@ -13,27 +13,43 @@ const useAuthStore = create((set, get) => ({
     try {
       const { data } = await api.post('/auth/login', { email, password });
       localStorage.setItem('utc_token', data.token);
-      api.defaults.headers.common['Authorization'] = `Bearer ${data.token}`;
+      api.defaults.headers.common.Authorization = `Bearer ${data.token}`;
       set({ user: data.user, token: data.token, loading: false });
-      // Return user so LoginPage can navigate immediately without waiting
       return { success: true, user: data.user };
     } catch (err) {
-      // Use custom user-friendly message if available (from API interceptor)
-      const msg = err.userMessage || 
-                  err.response?.data?.message || 
-                  err.message ||
-                  'Login failed. Please try again.';
-      
-      console.error('[Auth] Login error:', err);
+      const msg =
+        err.userMessage ||
+        err.response?.data?.message ||
+        err.message ||
+        'Login failed. Please try again.';
+
       set({ error: msg, loading: false });
       return { success: false, message: msg };
     }
   },
 
-  logout: () => {
+  logout: async () => {
+    try {
+      await api.post('/auth/logout');
+    } catch {
+      // Ignore logout network errors and clear local state anyway.
+    }
     localStorage.removeItem('utc_token');
-    delete api.defaults.headers.common['Authorization'];
+    delete api.defaults.headers.common.Authorization;
     set({ user: null, token: null, initializing: false });
+  },
+
+  refreshSession: async () => {
+    try {
+      const { data } = await api.post('/auth/refresh');
+      localStorage.setItem('utc_token', data.token);
+      api.defaults.headers.common.Authorization = `Bearer ${data.token}`;
+      set({ user: data.user, token: data.token });
+      return data.token;
+    } catch {
+      await get().logout();
+      return null;
+    }
   },
 
   fetchMe: async () => {
@@ -42,16 +58,25 @@ const useAuthStore = create((set, get) => ({
       set({ initializing: false });
       return;
     }
-    api.defaults.headers.common['Authorization'] = `Bearer ${token}`;
+
+    api.defaults.headers.common.Authorization = `Bearer ${token}`;
     try {
       const { data } = await api.get('/auth/me');
       set({ user: data.user, initializing: false });
-    } catch {
-      get().logout();
+    } catch (err) {
+      if (err.response?.status === 401) {
+        const refreshedToken = await get().refreshSession();
+        if (refreshedToken) {
+          const { data } = await api.get('/auth/me');
+          set({ user: data.user, initializing: false });
+          return;
+        }
+      }
+
+      await get().logout();
       set({ initializing: false });
     }
   },
 }));
 
 export default useAuthStore;
-

@@ -12,10 +12,12 @@ import {
   Menu,
   X,
   History,
+  Lock,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import useAuthStore from '../../store/authStore';
 import toast from 'react-hot-toast';
+import { normalizeRole } from '../../utils/roles';
 
 const MASTER_NAV = [
   { to: '/master/dashboard', icon: LayoutDashboard, label: 'Dashboard' },
@@ -78,7 +80,8 @@ export default function AppLayout() {
   const [isMobile, setIsMobile] = useState(() => window.innerWidth < 1024);
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 1024);
 
-  const nav = useMemo(() => getNavForRole(user?.role), [user?.role]);
+  const nav = useMemo(() => getNavForRole(normalizeRole(user?.role)), [user?.role]);
+  const franchiseStatus = user?.franchise_id?.status || (user?.franchise_id?.isActive === false ? 'inactive' : 'active');
 
   useEffect(() => {
     const handleResize = () => {
@@ -114,7 +117,7 @@ export default function AppLayout() {
 
       <aside
         className={[
-          'fixed inset-y-0 left-0 z-40 flex w-72 flex-col border-r border-dark-600 bg-dark-800 transition-transform duration-300 lg:static lg:z-auto lg:w-64',
+          'fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-dark-600 bg-dark-800 transition-transform duration-300 lg:static lg:z-auto lg:w-64',
           sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0',
         ].join(' ')}
       >
@@ -171,7 +174,10 @@ export default function AppLayout() {
               </span>
             </div>
             {user?.franchise_id ? (
-              <div className="mt-1 truncate text-xs text-gray-600">{user.franchise_id.name}</div>
+              <div className="mt-1 flex items-center gap-1 truncate text-xs text-gray-600">
+                {franchiseStatus !== 'active' ? <Lock size={11} className="text-red-400" /> : null}
+                <span>{user.franchise_id.name}</span>
+              </div>
             ) : null}
           </div>
 

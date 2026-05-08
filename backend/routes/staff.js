@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
 const { protect, authorise } = require('../middleware/auth');
+const { enforceActiveFranchise } = require('../middleware/franchiseGuard');
 
 const ROLE_RANK = {
   master_admin: 5,
@@ -21,7 +22,7 @@ const canManageUser = (actor, target) => {
 };
 
 // Get staff for current franchise (or all for master_admin)
-router.get('/', protect, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
+router.get('/', protect, enforceActiveFranchise, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
   try {
     const filter = {};
     if (req.user.role !== 'master_admin') {
@@ -39,7 +40,7 @@ router.get('/', protect, authorise('master_admin', 'franchise_owner', 'manager')
 });
 
 // Toggle active status
-router.put('/:id/toggle', protect, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
+router.put('/:id/toggle', protect, enforceActiveFranchise, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });
@@ -59,7 +60,7 @@ router.put('/:id/toggle', protect, authorise('master_admin', 'franchise_owner', 
 });
 
 // Update staff details
-router.put('/:id', protect, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
+router.put('/:id', protect, enforceActiveFranchise, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
   try {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ success: false, message: 'User not found' });

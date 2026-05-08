@@ -1,40 +1,70 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { checkRole } = require('./rbac');
 
-// Verify JWT token
-const protect = async (req, res, next) => {
-  let token;
+const parseCookies = (cookieHeader = '') =>
+  cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce((acc, part) => {
+      const separator = part.indexOf('=');
+      if (separator === -1) return acc;
+      const key = part.slice(0, separator).trim();
+      const value = decodeURIComponent(part.slice(separator + 1).trim());
+      acc[key] = value;
+      return acc;
+    }, {});
+
+const getBearerToken = (req) => {
   if (req.headers.authorization && req.headers.authorization.startsWith('Bearer ')) {
-    token = req.headers.authorization.split(' ')[1];
+    return req.headers.authorization.split(' ')[1];
   }
+  return null;
+};
+
+// Verify JWT access token
+const protect = async (req, res, next) => {
+  const token = getBearerToken(req);
+
   if (!token) {
-    return res.status(401).json({ success: false, message: 'Not authorised — no token' });
+    return res.status(401).json({ success: false, message: 'Not authorised - no token' });
   }
+
   try {
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    req.user = await User.findById(decoded.id).populate('franchise_id', 'name state franchiseCode');
+    req.user = await User.findById(decoded.id).populate('franchise_id', 'name state franchiseCode city status isActive');
+
     if (!req.user || !req.user.isActive) {
       return res.status(401).json({ success: false, message: 'User not found or deactivated' });
     }
+
     next();
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Invalid or expired token' });
   }
 };
 
-// Role-based access control factory
-const authorise = (...roles) => (req, res, next) => {
-  const requestedRoles = roles.includes('pos_staff')
-    ? [...roles, 'shift_operator']
-    : roles;
+const authorise = (...roles) => checkRole(...roles);
 
-  if (!requestedRoles.includes(req.user.role)) {
-    return res.status(403).json({
-      success: false,
-      message: `Role '${req.user.role}' is not permitted for this action`,
-    });
+// Refresh token guard for /auth/refresh
+const protectRefreshToken = (req, res, next) => {
+  const cookies = parseCookies(req.headers.cookie);
+  const refreshToken = cookies.utc_refresh_token;
+
+  if (!refreshToken) {
+    return res.status(401).json({ success: false, message: 'Refresh token missing' });
   }
-  next();
+
+  try {
+    req.refreshTokenPayload = jwt.verify(
+      refreshToken,
+      process.env.JWT_REFRESH_SECRET || process.env.JWT_SECRET
+    );
+    next();
+  } catch (err) {
+    return res.status(401).json({ success: false, message: 'Invalid or expired refresh token' });
+  }
 };
 
 // Ensure franchise data isolation:
@@ -53,4 +83,4 @@ const franchiseGuard = (paramName = 'franchiseId') => (req, res, next) => {
   next();
 };
 
-module.exports = { protect, authorise, franchiseGuard };
+module.exports = { protect, authorise, franchiseGuard, protectRefreshToken };

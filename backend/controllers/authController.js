@@ -1,29 +1,56 @@
+const { validationResult } = require('express-validator');
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
-const Franchise = require('../models/Franchise');
+const {
+  signAccessToken,
+  signRefreshToken,
+  setRefreshTokenCookie,
+  clearRefreshTokenCookie,
+} = require('../utils/tokenService');
 
-const signToken = (id) =>
-  jwt.sign({ id }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN || '7d' });
+const handleValidation = (req, res) => {
+  const errors = validationResult(req);
+  if (errors.isEmpty()) return null;
+  return res.status(400).json({
+    success: false,
+    message: errors.array()[0].msg,
+    errors: errors.array(),
+  });
+};
+
+const withUserFranchise = 'name state franchiseCode city status isActive';
 
 // @POST /api/auth/login
 const login = async (req, res) => {
   try {
+    const validationResponse = handleValidation(req, res);
+    if (validationResponse) return validationResponse;
+
     const { email, password } = req.body;
-    if (!email || !password) {
-      return res.status(400).json({ success: false, message: 'Email and password required' });
-    }
-    const user = await User.findOne({ email }).populate('franchise_id', 'name state franchiseCode city');
+    const user = await User.findOne({ email }).populate('franchise_id', withUserFranchise);
     if (!user || !user.isActive) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
+
+    if (user.franchise_id) {
+      const franchiseStatus = user.franchise_id.status || (user.franchise_id.isActive ? 'active' : 'inactive');
+      if (franchiseStatus !== 'active') {
+        return res.status(403).json({ success: false, message: 'Franchise is deactivated. Access denied.' });
+      }
+    }
+
     const isMatch = await user.comparePassword(password);
     if (!isMatch) {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
+
     user.lastLogin = new Date();
     await user.save({ validateBeforeSave: false });
 
-    const token = signToken(user._id);
+    const token = signAccessToken(user._id);
+    const refreshToken = signRefreshToken(user._id);
+    setRefreshTokenCookie(res, refreshToken);
+
     res.json({
       success: true,
       token,
@@ -34,17 +61,52 @@ const login = async (req, res) => {
   }
 };
 
+// @POST /api/auth/refresh
+const refresh = async (req, res) => {
+  try {
+    const user = await User.findById(req.refreshTokenPayload.id).populate('franchise_id', withUserFranchise);
+    if (!user || !user.isActive) {
+      clearRefreshTokenCookie(res);
+      return res.status(401).json({ success: false, message: 'User not found or deactivated' });
+    }
+
+    if (user.franchise_id) {
+      const franchiseStatus = user.franchise_id.status || (user.franchise_id.isActive ? 'active' : 'inactive');
+      if (franchiseStatus !== 'active') {
+        clearRefreshTokenCookie(res);
+        return res.status(403).json({ success: false, message: 'Franchise is deactivated. Access denied.' });
+      }
+    }
+
+    const token = signAccessToken(user._id);
+    const refreshToken = signRefreshToken(user._id);
+    setRefreshTokenCookie(res, refreshToken);
+
+    res.json({ success: true, token, user: user.toJSON() });
+  } catch (err) {
+    res.status(500).json({ success: false, message: err.message });
+  }
+};
+
+// @POST /api/auth/logout
+const logout = async (req, res) => {
+  clearRefreshTokenCookie(res);
+  res.json({ success: true, message: 'Logged out' });
+};
+
 // @GET /api/auth/me
 const getMe = async (req, res) => {
   res.json({ success: true, user: req.user });
 };
 
-// @POST /api/auth/create-staff  — Franchise Owner / Master Admin creates staff
+// @POST /api/auth/create-staff
 const createStaff = async (req, res) => {
   try {
+    const validationResponse = handleValidation(req, res);
+    if (validationResponse) return validationResponse;
+
     const { name, email, password, role, phone, franchise_id } = req.body;
 
-    // Permission matrix
     const allowed = {
       master_admin: ['master_admin', 'franchise_owner', 'manager', 'pos_staff', 'shift_operator', 'kitchen_staff'],
       franchise_owner: ['manager', 'pos_staff', 'shift_operator', 'kitchen_staff'],
@@ -55,7 +117,6 @@ const createStaff = async (req, res) => {
       return res.status(403).json({ success: false, message: 'You cannot create this role' });
     }
 
-    // Franchise assignment
     let assignedFranchise = franchise_id;
     if (req.user.role !== 'master_admin') {
       assignedFranchise = req.user.franchise_id._id || req.user.franchise_id;
@@ -68,7 +129,7 @@ const createStaff = async (req, res) => {
       name,
       email,
       password,
-      role: role === 'shift_operator' ? 'pos_staff' : role,
+      role,
       phone,
       franchise_id: role === 'master_admin' ? null : assignedFranchise,
     });
@@ -82,10 +143,14 @@ const createStaff = async (req, res) => {
 // @PUT /api/auth/change-password
 const changePassword = async (req, res) => {
   try {
+    const validationResponse = handleValidation(req, res);
+    if (validationResponse) return validationResponse;
+
     const { currentPassword, newPassword } = req.body;
     const user = await User.findById(req.user._id);
     const isMatch = await user.comparePassword(currentPassword);
     if (!isMatch) return res.status(400).json({ success: false, message: 'Current password incorrect' });
+
     user.password = newPassword;
     await user.save();
     res.json({ success: true, message: 'Password updated' });
@@ -94,4 +159,4 @@ const changePassword = async (req, res) => {
   }
 };
 
-module.exports = { login, getMe, createStaff, changePassword };
+module.exports = { login, refresh, logout, getMe, createStaff, changePassword };

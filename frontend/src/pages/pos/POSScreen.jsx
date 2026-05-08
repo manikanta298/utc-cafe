@@ -26,6 +26,7 @@ import toast from 'react-hot-toast';
 import api from '../../lib/api';
 import useAuthStore from '../../store/authStore';
 import { getSocket, joinPOSRoom } from '../../lib/socket';
+import usePermission from '../../hooks/usePermission';
 
 const CATEGORIES = ['All', 'Beverages', 'Snacks', 'Meals', 'Desserts', 'Breads', 'Specials', 'Add-ons'];
 const CATEGORY_ICONS = {
@@ -72,6 +73,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   const [category, setCategory] = useState('All');
   const [search, setSearch] = useState('');
   const [menuLoading, setMenuLoading] = useState(true);
+  const [menuError, setMenuError] = useState('');
 
   const [phone, setPhone] = useState('');
   const [customer, setCustomer] = useState(null);
@@ -93,6 +95,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   const [step, setStep] = useState('menu');
   const [orderResult, setOrderResult] = useState(null);
   const [placing, setPlacing] = useState(false);
+  const canManageBillingAdjustments = usePermission('inventory');
 
   useEffect(() => {
     if (!franchiseId) return undefined;
@@ -133,23 +136,25 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
     return () => socket.off('menu:availability', handleMenuAvailability);
   }, [franchiseId]);
 
+  const loadMenu = async () => {
+    if (!franchiseId || isHistoryMode) return;
+
+    try {
+      setMenuLoading(true);
+      setMenuError('');
+      const res = await api.get(`/menu?franchiseId=${franchiseId}`);
+      setMenuItems(res.data.items || []);
+    } catch {
+      setMenuItems([]);
+      setMenuError('Failed to load menu. Retry.');
+      toast.error('Failed to load menu');
+    } finally {
+      setMenuLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (!franchiseId || isHistoryMode) return undefined;
-
-    const loadMenu = async () => {
-      try {
-        setMenuLoading(true);
-        const res = await api.get(`/menu?franchiseId=${franchiseId}`);
-        setMenuItems(res.data.items || []);
-      } catch {
-        toast.error('Failed to load menu');
-      } finally {
-        setMenuLoading(false);
-      }
-    };
-
     loadMenu();
-    return undefined;
   }, [franchiseId, isHistoryMode]);
 
   const applyLookupPayload = (payload, target = 'billing') => {
@@ -644,6 +649,12 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
                   ))}
                 </div>
               ) : null}
+
+              {canManageBillingAdjustments ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <span className="badge border border-brand-500/20 bg-brand-500/10 text-brand-400">Manager billing tools visible</span>
+                </div>
+              ) : null}
             </div>
 
             <div className="border-b border-dark-600 px-4 py-3 sm:px-5">
@@ -680,6 +691,14 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
               {menuLoading ? (
                 <div className="flex justify-center py-16">
                   <div className="h-8 w-8 animate-spin rounded-full border-2 border-brand-500 border-t-transparent" />
+                </div>
+              ) : menuError ? (
+                <div className="flex flex-col items-center justify-center gap-3 py-16 text-sm text-gray-500">
+                  <span>{menuError}</span>
+                  <button onClick={loadMenu} className="btn-ghost px-4 py-2 text-xs flex items-center gap-2">
+                    <RefreshCw size={14} />
+                    Retry
+                  </button>
                 </div>
               ) : (
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-3 2xl:grid-cols-4">

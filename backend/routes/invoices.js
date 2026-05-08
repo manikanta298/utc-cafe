@@ -3,6 +3,7 @@ const PDFDocument = require('pdfkit');
 const router = express.Router();
 const Invoice = require('../models/Invoice');
 const { protect, authorise } = require('../middleware/auth');
+const { enforceActiveFranchise } = require('../middleware/franchiseGuard');
 
 const csvEscape = (value) => {
   const text = value === undefined || value === null ? '' : String(value);
@@ -153,7 +154,7 @@ const streamInvoicePdf = (res, invoice) => {
   doc.end();
 };
 
-router.get('/', protect, async (req, res) => {
+router.get('/', protect, enforceActiveFranchise, async (req, res) => {
   try {
     const { page = 1, limit = 20 } = req.query;
     const filter = buildInvoiceFilter(req);
@@ -172,7 +173,7 @@ router.get('/', protect, async (req, res) => {
   }
 });
 
-router.get('/search', protect, authorise('pos_staff', 'manager', 'franchise_owner'), async (req, res) => {
+router.get('/search', protect, enforceActiveFranchise, authorise('pos_staff', 'shift_operator', 'manager', 'franchise_owner'), async (req, res) => {
   try {
     const { phone } = req.query;
     if (!phone) return res.status(400).json({ success: false, message: 'Phone number required' });
@@ -188,7 +189,7 @@ router.get('/search', protect, authorise('pos_staff', 'manager', 'franchise_owne
   }
 });
 
-router.get('/export.csv', protect, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
+router.get('/export.csv', protect, enforceActiveFranchise, authorise('master_admin', 'franchise_owner', 'manager'), async (req, res) => {
   try {
     const invoices = await Invoice.find(buildInvoiceFilter(req))
       .populate('franchise_id', 'name franchiseCode')
@@ -221,7 +222,7 @@ router.get('/export.csv', protect, authorise('master_admin', 'franchise_owner', 
   }
 });
 
-router.get('/:id', protect, async (req, res) => {
+router.get('/:id', protect, enforceActiveFranchise, async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id).populate('franchise_id', 'name franchiseCode state gstin');
     if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
@@ -234,7 +235,7 @@ router.get('/:id', protect, async (req, res) => {
   }
 });
 
-router.get('/:id/receipt', protect, async (req, res) => {
+router.get('/:id/receipt', protect, enforceActiveFranchise, async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id).populate('franchise_id', 'name franchiseCode state gstin address phone');
     if (!invoice) return res.status(404).send('Invoice not found');
@@ -247,7 +248,7 @@ router.get('/:id/receipt', protect, async (req, res) => {
   }
 });
 
-router.get('/:id/pdf', protect, async (req, res) => {
+router.get('/:id/pdf', protect, enforceActiveFranchise, async (req, res) => {
   try {
     const invoice = await Invoice.findById(req.params.id).populate('franchise_id', 'name franchiseCode state gstin address phone');
     if (!invoice) return res.status(404).json({ success: false, message: 'Invoice not found' });
