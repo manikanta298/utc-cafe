@@ -83,6 +83,7 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/loyalty', require('./routes/loyalty'));
 app.use('/api/staff', require('./routes/staff'));
+app.use('/api/token-sessions', require('./routes/tokenSessions'));
 
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'UTC Cafe API running' }));
 

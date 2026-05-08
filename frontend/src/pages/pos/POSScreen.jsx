@@ -86,6 +86,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [recentOrders, setRecentOrders] = useState([]);
   const [customerInsights, setCustomerInsights] = useState(emptyInsights);
+  const [activeTokenSession, setActiveTokenSession] = useState(null);
 
   const [historySearch, setHistorySearch] = useState('');
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -99,6 +100,9 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   const [redeemPoints, setRedeemPoints] = useState(false);
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [paymentMode, setPaymentMode] = useState('Cash');
+  const [paymentStatus, setPaymentStatus] = useState('Pending');
+  const [amountPaid, setAmountPaid] = useState('');
+  const [tableNumber, setTableNumber] = useState('');
   const [step, setStep] = useState('menu');
   const [orderResult, setOrderResult] = useState(null);
   const [placing, setPlacing] = useState(false);
@@ -177,6 +181,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
       setCustomer(payload.customer);
       setRecentOrders(payload.recentOrders || []);
       setCustomerInsights(insights);
+      setActiveTokenSession(payload.activeTokenSession || null);
       setIsNewCustomer(false);
       setNewCustName('');
       setNewCustGender(payload.customer.gender || '');
@@ -187,6 +192,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
       setCustomer(null);
       setRecentOrders([]);
       setCustomerInsights(emptyInsights);
+      setActiveTokenSession(null);
       setIsNewCustomer(Boolean(payload.isNew));
       setNewCustGender('');
       setNewCustAge('');
@@ -203,6 +209,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
         setCustomer(null);
         setRecentOrders([]);
         setCustomerInsights(emptyInsights);
+        setActiveTokenSession(null);
         setIsNewCustomer(false);
       }
       return;
@@ -277,6 +284,9 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
     setRedeemPoints(false);
     setPointsToRedeem(0);
     setPaymentMode('Cash');
+    setPaymentStatus('Pending');
+    setAmountPaid('');
+    setTableNumber('');
     setStep('menu');
     setOrderResult(null);
   };
@@ -342,6 +352,10 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
         customer_id: customerId,
         items: cart.map((item) => ({ item_id: item.item_id, quantity: item.quantity })),
         payment_mode: paymentMode,
+        payment_status: paymentStatus,
+        amount_paid: amountPaid ? Number(amountPaid) : undefined,
+        close_token: paymentStatus === 'Fully Paid',
+        table_number: tableNumber,
         points_to_redeem: redeemPoints ? pointsToRedeem : 0,
       });
 
@@ -824,10 +838,34 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
                     />
                   </div>
                 ) : null}
+
+                <div className="relative w-full xl:w-32">
+                  <Receipt size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
+                  <input
+                    className="input pl-9 py-2 text-sm"
+                    placeholder="Table"
+                    value={tableNumber}
+                    onChange={(e) => setTableNumber(e.target.value)}
+                  />
+                </div>
               </div>
 
               {customer ? (
                 <div className="mt-4">
+                  {activeTokenSession ? (
+                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/20 bg-brand-500/10 px-3 py-2 text-sm">
+                      <span className="font-semibold text-brand-400">{activeTokenSession.token_label}</span>
+                      <span className="text-gray-500">open session</span>
+                      {activeTokenSession.table_number ? (
+                        <span className="badge border border-dark-500 bg-dark-700 text-gray-300">
+                          Table {activeTokenSession.table_number}
+                        </span>
+                      ) : null}
+                      <span className="badge border border-yellow-500/20 bg-yellow-500/10 text-yellow-400">
+                        Addition will attach to this token
+                      </span>
+                    </div>
+                  ) : null}
                   {renderInsights(customerInsights, customer, true)}
                 </div>
               ) : null}
@@ -1044,11 +1082,12 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
 
                 <div className="px-5 pb-3">
                   <div className="mb-2 text-xs text-gray-500">Payment Mode</div>
-                  <div className="grid grid-cols-3 gap-2">
+                  <div className="grid grid-cols-4 gap-2">
                     {[
                       { mode: 'Cash', icon: Banknote },
                       { mode: 'Card', icon: CreditCard },
                       { mode: 'UPI', icon: Smartphone },
+                      { mode: 'Net Banking', icon: CreditCard },
                     ].map(({ mode: payment, icon: Icon }) => (
                       <button
                         key={payment}
@@ -1065,6 +1104,42 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
                       </button>
                     ))}
                   </div>
+                </div>
+
+                <div className="px-5 pb-3">
+                  <div className="mb-2 text-xs text-gray-500">Payment Status</div>
+                  <div className="grid grid-cols-2 gap-2">
+                    {['Pending', 'Advance Paid', 'Partially Paid', 'Fully Paid'].map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => {
+                          setPaymentStatus(status);
+                          if (status === 'Fully Paid') setAmountPaid(finalAmount.toFixed(2));
+                        }}
+                        className={[
+                          'rounded-xl border px-2 py-2 text-xs font-medium transition-all',
+                          paymentStatus === status
+                            ? 'border-green-500 bg-green-500/15 text-green-400'
+                            : 'border-dark-500 bg-dark-700 text-gray-500 hover:text-white',
+                        ].join(' ')}
+                      >
+                        {status}
+                      </button>
+                    ))}
+                  </div>
+                  {paymentStatus !== 'Pending' ? (
+                    <div className="mt-2 flex items-center gap-2">
+                      <IndianRupee size={14} className="text-gray-500" />
+                      <input
+                        type="number"
+                        min="0"
+                        className="input py-2 text-sm"
+                        placeholder="Amount collected"
+                        value={amountPaid}
+                        onChange={(e) => setAmountPaid(e.target.value)}
+                      />
+                    </div>
+                  ) : null}
                 </div>
 
                 <div className="px-5 pb-5">

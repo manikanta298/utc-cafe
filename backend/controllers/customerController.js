@@ -2,10 +2,17 @@ const Customer = require('../models/Customer');
 const Order = require('../models/Order');
 const Invoice = require('../models/Invoice');
 const Loyalty = require('../models/Loyalty');
+const TokenSession = require('../models/TokenSession');
 const { calculatePointsValue } = require('../utils/gst');
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
 const formatCurrency = (value) => `Rs. ${Number(value || 0).toFixed(2)}`;
+
+const getStartOfDay = (date = new Date()) => {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return start;
+};
 
 const emptyInsights = () => ({
   last30DayVisits: 0,
@@ -147,6 +154,13 @@ const lookupByPhone = async (req, res) => {
     }
 
     const { recentOrders, customerInsights } = await buildCustomerInsights(req, customer._id);
+    const activeTokenFilter = {
+      customer_id: customer._id,
+      token_date: getStartOfDay(),
+      status: { $in: ['Open', 'Bill Pending'] },
+      ...getFranchiseFilter(req),
+    };
+    const activeTokenSession = await TokenSession.findOne(activeTokenFilter).lean();
 
     res.json({
       success: true,
@@ -156,6 +170,7 @@ const lookupByPhone = async (req, res) => {
       pointsValue: calculatePointsValue(customer.total_points),
       recentOrders,
       customerInsights,
+      activeTokenSession,
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });

@@ -52,6 +52,7 @@ const ROLE_LABELS = {
   franchise_owner: 'Franchise Owner',
   manager: 'Manager',
   pos_staff: 'POS Staff',
+  pos_shift_operator: 'POS Shift Operator',
   shift_operator: 'Shift Operator',
   kitchen_staff: 'Kitchen Staff',
 };
@@ -64,6 +65,7 @@ const getNavForRole = (role) => {
     case 'manager':
       return FRANCHISE_NAV;
     case 'pos_staff':
+    case 'pos_shift_operator':
     case 'shift_operator':
       return POS_NAV;
     case 'kitchen_staff':

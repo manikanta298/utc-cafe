@@ -4,6 +4,7 @@ const Franchise = require('../models/Franchise');
 const MenuItem = require('../models/MenuItem');
 const Invoice = require('../models/Invoice');
 const Loyalty = require('../models/Loyalty');
+const TokenSession = require('../models/TokenSession');
 const { determineTaxType, calculateOrderTax, calculatePointsEarned, calculatePointsValue } = require('../utils/gst');
 const { sendOrderPlaced } = require('../utils/sms');
 
@@ -22,11 +23,49 @@ const generateOrderNumber = async (franchise) => {
   return `${franchise.franchiseCode}-ORD-${String(count + 1).padStart(5, '0')}`;
 };
 
+const getStartOfDay = (date = new Date()) => {
+  const start = new Date(date);
+  start.setHours(0, 0, 0, 0);
+  return start;
+};
+
 // Generate token number (daily sequential per franchise)
-const generateTokenNumber = async (franchiseId) => {
-  const startOfDay = new Date(); startOfDay.setHours(0, 0, 0, 0);
-  const count = await Order.countDocuments({ franchise_id: franchiseId, createdAt: { $gte: startOfDay } });
+const generateTokenNumber = async (franchiseId, tokenDate) => {
+  const count = await TokenSession.countDocuments({ franchise_id: franchiseId, token_date: tokenDate });
   return count + 1;
+};
+
+const getOrCreateTokenSession = async ({ franchise, customer, tableNumber, userId }) => {
+  const tokenDate = getStartOfDay();
+  let session = await TokenSession.findOne({
+    franchise_id: franchise._id,
+    customer_id: customer._id,
+    token_date: tokenDate,
+    status: { $in: ['Open', 'Bill Pending'] },
+  });
+
+  if (session) {
+    if (tableNumber && !session.table_number) {
+      session.table_number = tableNumber;
+      await session.save();
+    }
+    return { session, isAddition: session.order_ids.length > 0 };
+  }
+
+  const tokenNumber = await generateTokenNumber(franchise._id, tokenDate);
+  const tokenLabel = `${franchise.franchiseCode || 'TOKEN'}-${String(tokenNumber).padStart(3, '0')}`;
+
+  session = await TokenSession.create({
+    franchise_id: franchise._id,
+    customer_id: customer._id,
+    token_date: tokenDate,
+    token_number: tokenNumber,
+    token_label: tokenLabel,
+    table_number: tableNumber || '',
+    created_by: userId,
+  });
+
+  return { session, isAddition: false };
 };
 
 // @POST /api/orders  — Create new order (POS staff)
@@ -36,6 +75,10 @@ const createOrder = async (req, res) => {
       customer_id,
       items,            // [{item_id, quantity}]
       payment_mode,
+      payment_status,
+      amount_paid,
+      close_token,
+      table_number,
       points_to_redeem, // optional
       customer_state,   // optional — for IGST logic
     } = req.body;
@@ -90,7 +133,20 @@ const createOrder = async (req, res) => {
     const pointsEarned = calculatePointsEarned(finalAmount);
 
     const orderNumber = await generateOrderNumber(franchise);
-    const tokenNumber = await generateTokenNumber(franchise._id);
+    const { session, isAddition } = await getOrCreateTokenSession({
+      franchise,
+      customer,
+      tableNumber: table_number,
+      userId: req.user._id,
+    });
+
+    const normalizedPaymentStatus = payment_status || 'Pending';
+    const allowedPaymentStatuses = ['Pending', 'Advance Paid', 'Partially Paid', 'Fully Paid'];
+    if (!allowedPaymentStatuses.includes(normalizedPaymentStatus)) {
+      return res.status(400).json({ success: false, message: 'Invalid payment status' });
+    }
+
+    const paidAmount = Number(amount_paid || (normalizedPaymentStatus === 'Fully Paid' ? finalAmount : 0));
 
     const order = await Order.create({
       order_number: orderNumber,
@@ -108,13 +164,39 @@ const createOrder = async (req, res) => {
       final_amount: finalAmount,
       tax_type: taxType,
       payment_mode,
-      payment_status: 'Paid',
+      payment_status: normalizedPaymentStatus === 'Fully Paid' ? 'Paid' : 'Pending',
       kitchen_status: 'Pending',
-      token_number: tokenNumber,
+      token_number: session.token_number,
+      token_label: session.token_label,
+      session_id: session._id,
+      table_number: session.table_number,
+      is_addition: isAddition,
       created_by: req.user._id,
       points_earned: pointsEarned,
       status_history: [{ status: 'Pending', updatedBy: req.user._id }],
     });
+
+    session.order_ids.push(order._id);
+    session.total_amount = +(Number(session.total_amount || 0) + finalAmount).toFixed(2);
+    session.amount_paid = +(Number(session.amount_paid || 0) + paidAmount).toFixed(2);
+
+    if (close_token || normalizedPaymentStatus === 'Fully Paid') {
+      session.status = 'Closed';
+      session.payment_status = 'Fully Paid';
+      session.closed_at = new Date();
+      session.closed_by = req.user._id;
+    } else if (session.amount_paid <= 0) {
+      session.status = 'Open';
+      session.payment_status = 'Pending';
+    } else if (session.amount_paid < session.total_amount) {
+      session.status = 'Bill Pending';
+      session.payment_status = session.order_ids.length === 1 ? 'Advance Paid' : 'Partially Paid';
+    } else {
+      session.status = 'Bill Pending';
+      session.payment_status = 'Partially Paid';
+    }
+
+    await session.save();
 
     // Update customer totals and points
     const balanceBefore = customer.total_points;
@@ -159,6 +241,7 @@ const createOrder = async (req, res) => {
     const invoice = await Invoice.create({
       invoice_no: invoiceNo,
       order_id: order._id,
+      session_id: session._id,
       franchise_id: franchise._id,
       customer_id: customer._id,
       franchise_name: franchise.name,
@@ -175,6 +258,7 @@ const createOrder = async (req, res) => {
       discount_amount: discountAmount,
       final_amount: finalAmount,
       payment_mode,
+      payment_status: session.payment_status,
       items: orderItems.map((i) => ({
         name: i.name,
         hsn_code: i.hsn_code,
@@ -206,6 +290,7 @@ const createOrder = async (req, res) => {
       success: true,
       order: populatedOrder,
       invoice,
+      tokenSession: session,
       customer: { ...customer.toObject(), total_points: customer.total_points },
     });
   } catch (err) {

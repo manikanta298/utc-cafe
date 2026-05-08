@@ -28,6 +28,7 @@ const ROLE_HOME = {
   franchise_owner: '/franchise/dashboard',
   manager:         '/franchise/dashboard',
   pos_staff:       '/pos',
+  pos_shift_operator: '/pos',
   shift_operator:  '/pos',
   kitchen_staff:   '/kitchen',
 };

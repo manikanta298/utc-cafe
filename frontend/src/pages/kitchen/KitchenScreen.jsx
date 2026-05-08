@@ -42,6 +42,9 @@ const OrderCard = ({ order, onStatusUpdate, updating }) => {
             <div>
               <div className="text-xs font-mono text-gray-500">{order.order_number}</div>
               <div className="text-sm font-semibold text-white">{order.customer_id?.name}</div>
+              {order.table_number ? (
+                <div className="text-xs text-gray-500">Table {order.table_number}</div>
+              ) : null}
             </div>
           </div>
         </div>
@@ -54,6 +57,11 @@ const OrderCard = ({ order, onStatusUpdate, updating }) => {
 
       {/* Items */}
       <div className="space-y-1.5">
+        {order.is_addition ? (
+          <div className="rounded-lg border border-brand-500/30 bg-brand-500/10 px-2 py-1 text-xs font-bold uppercase tracking-wide text-brand-400">
+            Addition to token #{order.token_number}
+          </div>
+        ) : null}
         {order.items?.map((item, i) => (
           <div key={i} className="flex items-center justify-between text-sm">
             <span className="text-white font-medium">{item.name}</span>
@@ -80,14 +88,14 @@ const OrderCard = ({ order, onStatusUpdate, updating }) => {
           {updating === order._id ? (
             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto" />
           ) : (
-            `✓ ${config.label}`
+            config.label
           )}
         </button>
       )}
 
       {order.kitchen_status === 'Ready' && (
         <div className="text-center text-xs text-green-400 font-semibold animate-pulse">
-          🔔 Notify customer sent
+          Customer notification sent
         </div>
       )}
     </div>
@@ -133,7 +141,7 @@ export default function KitchenScreen() {
       setOrders((prev) => {
         const exists = prev.find((o) => o._id === order._id);
         if (!exists) {
-          toast('New order arrived!', { icon: '🔔' });
+          toast(order.is_addition ? `Addition to token #${order.token_number}` : 'New order arrived!');
           return [order, ...prev];
         }
         return prev;
