@@ -1,6 +1,5 @@
 const Order = require('../models/Order');
 const Franchise = require('../models/Franchise');
-const TokenSession = require('../models/TokenSession');
 const {
   sendOrderAccepted,
   sendOrderPreparing,
@@ -25,7 +24,6 @@ const getKitchenOrders = async (req, res) => {
       kitchen_status: { $in: ['Pending', 'Accepted', 'Preparing', 'Ready'] },
     })
       .populate('customer_id', 'name phone_no')
-      .populate('session_id', 'token_label payment_status status amount_paid total_amount table_number')
       .sort({ createdAt: 1 });
     res.json({ success: true, orders });
   } catch (err) {
@@ -66,11 +64,8 @@ const updateKitchenStatus = async (req, res) => {
     const io = req.app.get('io');
     const payload = {
       orderId:             order._id,
-      sessionId:           order.session_id,
       orderNumber:         order.order_number,
       tokenNumber:         order.token_number,
-      tokenLabel:          order.token_label,
-      tableNumber:         order.table_number,
       status,
       customerName:        order.customer_id?.name,
       customerPhone:       order.customer_id?.phone_no,
@@ -79,31 +74,6 @@ const updateKitchenStatus = async (req, res) => {
     };
     io.to(`franchise:${order.franchise_id._id}`).emit('order:statusUpdate', payload);
     io.to(`pos:${order.franchise_id._id}`).emit('order:statusUpdate', payload);
-    io.to(`kitchen:${order.franchise_id._id}`).emit('order:statusUpdate', payload);
-    io.to(`display:${order.franchise_id._id}`).emit('order:statusUpdate', payload);
-
-    if (order.session_id) {
-      const session = await TokenSession.findById(order.session_id);
-      if (session) {
-        const tokenPayload = {
-          sessionId: session._id,
-          tokenLabel: session.token_label,
-          tokenNumber: session.token_number,
-          tableNumber: session.table_number,
-          status: session.status,
-          paymentStatus: session.payment_status,
-          totalAmount: session.total_amount,
-          amountPaid: session.amount_paid,
-          outstandingAmount: Math.max(0, +(Number(session.total_amount || 0) - Number(session.amount_paid || 0)).toFixed(2)),
-          kitchenStatus: status,
-          updatedAt: new Date(),
-        };
-        io.to(`display:${order.franchise_id._id}`).emit(status === 'Ready' ? 'token:ready' : 'token:updated', tokenPayload);
-        if (status === 'Delivered') {
-          io.to(`display:${order.franchise_id._id}`).emit('token:delivered', tokenPayload);
-        }
-      }
-    }
 
     // SMS notifications — non-blocking
     const customerPhone = order.customer_id?.phone_no;

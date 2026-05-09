@@ -39,13 +39,6 @@ const protect = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'User not found or deactivated' });
     }
 
-    if (req.user.role !== 'master_admin' && req.user.franchise_id) {
-      const franchiseStatus = req.user.franchise_id.status || (req.user.franchise_id.isActive ? 'active' : 'inactive');
-      if (franchiseStatus !== 'active') {
-        return res.status(403).json({ success: false, message: 'Franchise is deactivated. Access denied.' });
-      }
-    }
-
     next();
   } catch (err) {
     return res.status(401).json({ success: false, message: 'Invalid or expired token' });

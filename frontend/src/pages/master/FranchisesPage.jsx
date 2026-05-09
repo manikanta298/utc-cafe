@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Plus, Building2, MapPin, FileText, X, Archive, Lock } from 'lucide-react';
 import api from '../../lib/api';
+import FranchisePaymentSetup from './FranchisePaymentSetup';
 import toast from 'react-hot-toast';
 
 const STATES = ['Andhra Pradesh','Arunachal Pradesh','Assam','Bihar','Chhattisgarh','Goa','Gujarat','Haryana','Himachal Pradesh','Jharkhand','Karnataka','Kerala','Madhya Pradesh','Maharashtra','Manipur','Meghalaya','Mizoram','Nagaland','Odisha','Punjab','Rajasthan','Sikkim','Tamil Nadu','Telangana','Tripura','Uttar Pradesh','Uttarakhand','West Bengal','Delhi','Jammu and Kashmir','Ladakh','Puducherry'];
@@ -17,6 +18,7 @@ export default function FranchisesPage() {
   const [franchises, setFranchises] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showModal, setShowModal] = useState(false);
+  const [paymentSetupFranchise, setPaymentSetupFranchise] = useState(null);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ name: '', location: '', city: '', state: 'Tamil Nadu', gstin: '', phone: '', email: '', address: '' });
 
@@ -164,6 +166,12 @@ export default function FranchisesPage() {
                   <Archive size={13} />
                   Archive Franchise
                 </button>
+                <button
+                  onClick={() => setPaymentSetupFranchise(franchise)}
+                  className="col-span-2 rounded-lg px-3 py-1.5 text-xs transition-colors bg-brand-500/10 hover:bg-brand-500/20 text-brand-400 border border-brand-500/20 flex items-center justify-center gap-2"
+                >
+                  Payment Setup
+                </button>
               </div>
             </div>
           );
@@ -198,6 +206,24 @@ export default function FranchisesPage() {
           </div>
         </div>
       ) : null}
+
+      {/* Payment Setup Modal */}
+      {paymentSetupFranchise && (
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="card w-full max-w-2xl max-h-[90vh] overflow-y-auto animate-slide-up">
+            <div className="flex items-center justify-between p-6 border-b border-dark-600">
+              <h2 className="font-display text-xl font-bold text-white">Payment Setup</h2>
+              <button onClick={() => setPaymentSetupFranchise(null)} className="text-gray-500 hover:text-white">✕</button>
+            </div>
+            <div className="p-6">
+              <FranchisePaymentSetup
+                franchiseId={paymentSetupFranchise._id}
+                franchiseName={paymentSetupFranchise.name}
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

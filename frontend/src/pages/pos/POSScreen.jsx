@@ -28,6 +28,7 @@ import api from '../../lib/api';
 import useAuthStore from '../../store/authStore';
 import { getSocket, joinPOSRoom } from '../../lib/socket';
 import usePermission from '../../hooks/usePermission';
+import { joinFranchiseRoom } from '../../lib/socket';
 
 const CATEGORIES = ['All', 'Beverages', 'Snacks', 'Meals', 'Desserts', 'Breads', 'Specials', 'Add-ons'];
 const CATEGORY_ICONS = {
@@ -86,7 +87,6 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   const [isNewCustomer, setIsNewCustomer] = useState(false);
   const [recentOrders, setRecentOrders] = useState([]);
   const [customerInsights, setCustomerInsights] = useState(emptyInsights);
-  const [activeTokenSession, setActiveTokenSession] = useState(null);
 
   const [historySearch, setHistorySearch] = useState('');
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -100,13 +100,19 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   const [redeemPoints, setRedeemPoints] = useState(false);
   const [pointsToRedeem, setPointsToRedeem] = useState(0);
   const [paymentMode, setPaymentMode] = useState('Cash');
-  const [paymentStatus, setPaymentStatus] = useState('Pending');
-  const [amountPaid, setAmountPaid] = useState('');
-  const [tableNumber, setTableNumber] = useState('');
   const [step, setStep] = useState('menu');
   const [orderResult, setOrderResult] = useState(null);
   const [placing, setPlacing] = useState(false);
   const canManageBillingAdjustments = usePermission('inventory');
+
+  // Session / Token system
+  const [activeSession, setActiveSession] = useState(null);
+  const [sessionLoading, setSessionLoading] = useState(false);
+  const [couponCode, setCouponCode] = useState('');
+  const [couponApplied, setCouponApplied] = useState(null); // { code, discountAmount, finalAmount }
+  const [couponLoading, setCouponLoading] = useState(false);
+  const [destination, setDestination] = useState('kitchen'); // 'kitchen' | 'counter'
+  const [tableNumber, setTableNumber] = useState('');
 
   useEffect(() => {
     if (!franchiseId) return undefined;
@@ -117,8 +123,15 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
       toast(`Order #${data.orderNumber}: ${data.status}`);
     };
 
+    joinFranchiseRoom(franchiseId);
     socket.on('order:statusUpdate', handleStatusUpdate);
-    return () => socket.off('order:statusUpdate', handleStatusUpdate);
+    socket.on('token:announce', ({ tokenNumber: t }) => {
+      toast.success(`Token ${t} is ready for collection!`, { duration: 5000 });
+    });
+    return () => {
+      socket.off('order:statusUpdate', handleStatusUpdate);
+      socket.off('token:announce');
+    };
   }, [franchiseId]);
 
   useEffect(() => {
@@ -181,7 +194,6 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
       setCustomer(payload.customer);
       setRecentOrders(payload.recentOrders || []);
       setCustomerInsights(insights);
-      setActiveTokenSession(payload.activeTokenSession || null);
       setIsNewCustomer(false);
       setNewCustName('');
       setNewCustGender(payload.customer.gender || '');
@@ -192,12 +204,62 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
       setCustomer(null);
       setRecentOrders([]);
       setCustomerInsights(emptyInsights);
-      setActiveTokenSession(null);
       setIsNewCustomer(Boolean(payload.isNew));
       setNewCustGender('');
       setNewCustAge('');
       setNewCustCity('');
     }
+  };
+
+  const startOrResumeSession = async (mobile) => {
+    if (!franchiseId || mobile.length < 10) return;
+    setSessionLoading(true);
+    try {
+      const res = await api.post('/sessions/start', {
+        mobile,
+        franchiseId,
+        tableNumber: tableNumber || 'Counter',
+        orderType: tableNumber ? 'dine_in' : 'counter',
+      });
+      setActiveSession(res.data.session);
+      if (res.data.isResumed) {
+        toast(`Resumed ${res.data.session.tokenNumber} — ${res.data.session.tableNumber}`, { icon: '🔄' });
+      } else {
+        toast.success(`${res.data.session.tokenNumber} — ${res.data.session.tableNumber || 'Counter'}`);
+      }
+    } catch (err) {
+      console.error('Session start error:', err.message);
+    } finally {
+      setSessionLoading(false);
+    }
+  };
+
+  const applyCoupon = async () => {
+    if (!couponCode.trim()) return;
+    const orderAmount = couponApplied ? couponApplied.originalAmount : grossTotal;
+    setCouponLoading(true);
+    try {
+      const res = await api.post('/coupons/validate', {
+        code: couponCode.trim(),
+        orderAmount,
+      });
+      setCouponApplied({
+        code: res.data.coupon.code,
+        discountAmount: res.data.discountAmount,
+        finalAmount: res.data.finalAmount,
+        originalAmount: orderAmount,
+      });
+      toast.success(`Coupon applied: Rs. ${res.data.discountAmount} off`);
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Invalid coupon');
+    } finally {
+      setCouponLoading(false);
+    }
+  };
+
+  const removeCoupon = () => {
+    setCouponApplied(null);
+    setCouponCode('');
   };
 
   const lookupCustomerByPhone = async (value, target = 'billing') => {
@@ -209,8 +271,8 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
         setCustomer(null);
         setRecentOrders([]);
         setCustomerInsights(emptyInsights);
-        setActiveTokenSession(null);
         setIsNewCustomer(false);
+        setActiveSession(null);
       }
       return;
     }
@@ -221,6 +283,10 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
     try {
       const res = await api.get(`/customers/lookup?phone=${value}`);
       applyLookupPayload(res.data, target);
+      // Start or resume session for billing mode
+      if (target === 'billing') {
+        await startOrResumeSession(value);
+      }
     } catch {
       toast.error('Customer lookup failed');
     } finally {
@@ -275,7 +341,6 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
     setCustomer(null);
     setRecentOrders([]);
     setCustomerInsights(emptyInsights);
-    setActiveTokenSession(null);
     setPhone('');
     setNewCustName('');
     setNewCustGender('');
@@ -285,11 +350,12 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
     setRedeemPoints(false);
     setPointsToRedeem(0);
     setPaymentMode('Cash');
-    setPaymentStatus('Pending');
-    setAmountPaid('');
-    setTableNumber('');
     setStep('menu');
     setOrderResult(null);
+    setActiveSession(null);
+    setCouponCode('');
+    setCouponApplied(null);
+    setTableNumber('');
   };
 
   const openReceipt = async (invoiceId) => {
@@ -303,23 +369,13 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
     downloadBlob(res.data, 'application/pdf', `${invoiceNo || 'invoice'}.pdf`);
   };
 
-  const openMergedReceipt = async (sessionId) => {
-    const res = await api.get(`/token-sessions/${sessionId}/receipt`, { responseType: 'text' });
-    const url = URL.createObjectURL(new Blob([res.data], { type: 'text/html' }));
-    window.open(url, '_blank', 'noopener,noreferrer');
-  };
-
-  const downloadMergedReceiptPdf = async (sessionId, tokenLabel) => {
-    const res = await api.get(`/token-sessions/${sessionId}/pdf`, { responseType: 'blob' });
-    downloadBlob(res.data, 'application/pdf', `${tokenLabel || 'session-bill'}.pdf`);
-  };
-
   const subTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
   const taxTotal = cart.reduce((sum, item) => sum + ((item.price * item.quantity * item.gst_rate) / 100), 0);
   const grossTotal = subTotal + taxTotal;
   const maxRedeemPoints = customer?.total_points || 0;
   const redeemDiscount = redeemPoints ? +(pointsToRedeem * RUPEES_PER_POINT).toFixed(2) : 0;
-  const finalAmount = Math.max(0, +(grossTotal - redeemDiscount).toFixed(2));
+  const couponDiscount = couponApplied ? couponApplied.discountAmount : 0;
+  const finalAmount = Math.max(0, +(grossTotal - redeemDiscount - couponDiscount).toFixed(2));
   const pointsToEarn = Math.floor(finalAmount * POINTS_PER_RUPEE);
 
   const filteredMenu = menuItems.filter((item) => {
@@ -360,21 +416,27 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
         customerId = createRes.data.customer._id;
       }
 
-      const res = await api.post('/orders', {
-        customer_id: customerId,
-        items: cart.map((item) => ({ item_id: item.item_id, quantity: item.quantity })),
-        payment_mode: paymentMode,
-        payment_status: paymentStatus,
-        amount_paid: amountPaid ? Number(amountPaid) : undefined,
-        close_token: paymentStatus === 'Fully Paid',
-        table_number: tableNumber,
-        points_to_redeem: redeemPoints ? pointsToRedeem : 0,
-      });
-
-      setActiveTokenSession(res.data.tokenSession || null);
-      setOrderResult(res.data);
-      setStep('success');
-      toast.success(`Order ${res.data.order.order_number} placed`);
+      // If we have an active session, add order to it
+      if (activeSession) {
+        const addRes = await api.post(`/sessions/${activeSession._id}/orders`, {
+          items: cart.map((item) => ({ menuItemId: item.item_id, qty: item.quantity, notes: '' })),
+          destination,
+        });
+        setOrderResult({ order: { order_number: addRes.data.order?.order_number, token_number: activeSession.tokenNumber, payment_mode: paymentMode, final_amount: finalAmount }, invoice: addRes.data.order });
+        setStep('success');
+        toast.success(`Sent to ${destination} — ${activeSession.tokenNumber}`);
+      } else {
+        // Fallback to original order API
+        const res = await api.post('/orders', {
+          customer_id: customerId,
+          items: cart.map((item) => ({ item_id: item.item_id, quantity: item.quantity })),
+          payment_mode: paymentMode,
+          points_to_redeem: redeemPoints ? pointsToRedeem : 0,
+        });
+        setOrderResult(res.data);
+        setStep('success');
+        toast.success(`Order ${res.data.order.order_number} placed`);
+      }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Order failed');
     } finally {
@@ -384,24 +446,6 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
 
   const historyPhone = historySearch.trim().replace(/\D/g, '').slice(0, 10);
   const showShellHeader = !embedded;
-
-  useEffect(() => {
-    if (!franchiseId) return undefined;
-    const socket = getSocket();
-
-    const handleTokenUpdate = (payload) => {
-      setActiveTokenSession((current) => {
-        if (!current) return current;
-        const currentId = current._id || current.sessionId;
-        if (!currentId || currentId.toString() !== payload.sessionId?.toString()) return current;
-        if (payload.status === 'Closed') return null;
-        return { ...current, ...payload, _id: currentId };
-      });
-    };
-
-    socket.on('token:updated', handleTokenUpdate);
-    return () => socket.off('token:updated', handleTokenUpdate);
-  }, [franchiseId]);
 
   const searchHistory = async () => {
     if (!historySearch.trim()) return;
@@ -626,9 +670,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   );
 
   if (step === 'success' && orderResult) {
-    const { order, invoice, tokenSession, customer: updatedCustomer } = orderResult;
-    const collectedAmount = Number(tokenSession?.amount_paid || amountPaid || order.final_amount || 0);
-    const outstandingAmount = Math.max(0, +(Number(tokenSession?.total_amount || order.final_amount || 0) - collectedAmount).toFixed(2));
+    const { order, invoice, customer: updatedCustomer } = orderResult;
 
     return (
       <div className={`${embedded ? '' : 'min-h-screen'} flex items-center justify-center`}>
@@ -641,13 +683,11 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
 
           <div className="mb-6 space-y-2 rounded-xl bg-dark-700 p-4 text-left">
             <div className="flex justify-between text-sm"><span className="text-gray-500">Order #</span><span className="font-mono text-brand-400">{order.order_number}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-gray-500">Token</span><span className="text-lg font-bold text-white">{tokenSession?.token_label || `#${order.token_number}`}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-gray-500">Token</span><span className="text-lg font-bold text-white">#{order.token_number}</span></div>
             <div className="flex justify-between text-sm"><span className="text-gray-500">Invoice</span><span className="font-mono text-gray-300">{invoice.invoice_no}</span></div>
             <div className="flex justify-between text-sm"><span className="text-gray-500">Payment</span><span className="text-green-400">{order.payment_mode}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-gray-500">Session Status</span><span className="text-gray-300">{tokenSession?.payment_status || order.payment_status}</span></div>
             <div className="border-t border-dark-500 pt-2">
-              <div className="flex justify-between"><span className="text-gray-500">Collected</span><span className="text-lg font-bold text-green-400">{formatMoney(collectedAmount)}</span></div>
-              <div className="mt-1 flex justify-between"><span className="text-gray-500">Outstanding</span><span className="font-semibold text-yellow-400">{formatMoney(outstandingAmount)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Amount Paid</span><span className="text-lg font-bold text-green-400">{formatMoney(order.final_amount)}</span></div>
             </div>
           </div>
 
@@ -671,22 +711,6 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
             <button onClick={() => downloadReceiptPdf(invoice._id, invoice.invoice_no)} className="btn-ghost px-4 flex items-center gap-2">
               <Download size={16} />
             </button>
-            {tokenSession?._id ? (
-              <>
-                <button
-                  onClick={() => openMergedReceipt(tokenSession._id)}
-                  className="btn-ghost px-4 text-xs"
-                >
-                  Merged Bill
-                </button>
-                <button
-                  onClick={() => downloadMergedReceiptPdf(tokenSession._id, tokenSession.token_label)}
-                  className="btn-ghost px-4 text-xs"
-                >
-                  Merged PDF
-                </button>
-              </>
-            ) : null}
           </div>
         </div>
       </div>
@@ -889,34 +913,10 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
                     />
                   </div>
                 ) : null}
-
-                <div className="relative w-full xl:w-32">
-                  <Receipt size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
-                  <input
-                    className="input pl-9 py-2 text-sm"
-                    placeholder="Table"
-                    value={tableNumber}
-                    onChange={(e) => setTableNumber(e.target.value)}
-                  />
-                </div>
               </div>
 
               {customer ? (
                 <div className="mt-4">
-                  {activeTokenSession ? (
-                    <div className="mb-3 flex flex-wrap items-center gap-2 rounded-xl border border-brand-500/20 bg-brand-500/10 px-3 py-2 text-sm">
-                      <span className="font-semibold text-brand-400">{activeTokenSession.token_label}</span>
-                      <span className="text-gray-500">open session</span>
-                      {activeTokenSession.table_number ? (
-                        <span className="badge border border-dark-500 bg-dark-700 text-gray-300">
-                          Table {activeTokenSession.table_number}
-                        </span>
-                      ) : null}
-                      <span className="badge border border-yellow-500/20 bg-yellow-500/10 text-yellow-400">
-                        Addition will attach to this token
-                      </span>
-                    </div>
-                  ) : null}
                   {renderInsights(customerInsights, customer, true)}
                 </div>
               ) : null}
@@ -1133,12 +1133,11 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
 
                 <div className="px-5 pb-3">
                   <div className="mb-2 text-xs text-gray-500">Payment Mode</div>
-                  <div className="grid grid-cols-4 gap-2">
+                  <div className="grid grid-cols-3 gap-2">
                     {[
                       { mode: 'Cash', icon: Banknote },
                       { mode: 'Card', icon: CreditCard },
                       { mode: 'UPI', icon: Smartphone },
-                      { mode: 'Net Banking', icon: CreditCard },
                     ].map(({ mode: payment, icon: Icon }) => (
                       <button
                         key={payment}
@@ -1155,42 +1154,6 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
                       </button>
                     ))}
                   </div>
-                </div>
-
-                <div className="px-5 pb-3">
-                  <div className="mb-2 text-xs text-gray-500">Payment Status</div>
-                  <div className="grid grid-cols-2 gap-2">
-                    {['Pending', 'Advance Paid', 'Partially Paid', 'Fully Paid'].map((status) => (
-                      <button
-                        key={status}
-                        onClick={() => {
-                          setPaymentStatus(status);
-                          if (status === 'Fully Paid') setAmountPaid(finalAmount.toFixed(2));
-                        }}
-                        className={[
-                          'rounded-xl border px-2 py-2 text-xs font-medium transition-all',
-                          paymentStatus === status
-                            ? 'border-green-500 bg-green-500/15 text-green-400'
-                            : 'border-dark-500 bg-dark-700 text-gray-500 hover:text-white',
-                        ].join(' ')}
-                      >
-                        {status}
-                      </button>
-                    ))}
-                  </div>
-                  {paymentStatus !== 'Pending' ? (
-                    <div className="mt-2 flex items-center gap-2">
-                      <IndianRupee size={14} className="text-gray-500" />
-                      <input
-                        type="number"
-                        min="0"
-                        className="input py-2 text-sm"
-                        placeholder="Amount collected"
-                        value={amountPaid}
-                        onChange={(e) => setAmountPaid(e.target.value)}
-                      />
-                    </div>
-                  ) : null}
                 </div>
 
                 <div className="px-5 pb-5">

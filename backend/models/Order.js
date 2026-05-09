@@ -35,12 +35,8 @@ const orderSchema = new mongoose.Schema(
     tax_type: { type: String, enum: ['CGST_SGST', 'IGST'], required: true },
 
     // Payment
-    payment_mode: { type: String, enum: ['Cash', 'Card', 'UPI', 'Net Banking'], required: true },
-    payment_status: {
-      type: String,
-      enum: ['Pending', 'Advance Paid', 'Partially Paid', 'Fully Paid', 'Refunded'],
-      default: 'Pending',
-    },
+    payment_mode: { type: String, enum: ['Cash', 'Card', 'UPI'], required: true },
+    payment_status: { type: String, enum: ['Pending', 'Paid', 'Refunded'], default: 'Paid' },
 
     // Kitchen status
     kitchen_status: {
@@ -58,10 +54,6 @@ const orderSchema = new mongoose.Schema(
 
     // Token number shown to customer (sequential per day per franchise)
     token_number: { type: Number },
-    token_label: { type: String, default: '' },
-    session_id: { type: mongoose.Schema.Types.ObjectId, ref: 'TokenSession', default: null },
-    table_number: { type: String, trim: true, default: '' },
-    is_addition: { type: Boolean, default: false },
 
     // POS staff who created the order
     created_by: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
@@ -79,7 +71,5 @@ orderSchema.index({ franchise_id: 1, createdAt: -1 });
 orderSchema.index({ customer_id: 1 });
 orderSchema.index({ kitchen_status: 1, franchise_id: 1 });
 orderSchema.index({ archivedAt: 1, createdAt: -1 });
-orderSchema.index({ session_id: 1, createdAt: 1 });
-orderSchema.index({ franchise_id: 1, token_number: 1, createdAt: -1 });
 
 module.exports = mongoose.model('Order', orderSchema);

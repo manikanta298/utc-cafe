@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Coffee, ChefHat, Clock, CheckCircle, LogOut, RefreshCw, Volume2, VolumeX } from 'lucide-react';
 import api from '../../lib/api';
 import useAuthStore from '../../store/authStore';
-import { joinFranchiseRoom, joinKitchenRoom, getSocket } from '../../lib/socket';
+import { joinFranchiseRoom, getSocket } from '../../lib/socket';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
@@ -42,14 +42,6 @@ const OrderCard = ({ order, onStatusUpdate, updating }) => {
             <div>
               <div className="text-xs font-mono text-gray-500">{order.order_number}</div>
               <div className="text-sm font-semibold text-white">{order.customer_id?.name}</div>
-              {order.session_id?.payment_status ? (
-                <div className="mt-1 text-[11px] text-gray-500">
-                  {order.session_id.payment_status} · Rs. {Number(order.session_id.amount_paid || 0).toFixed(0)} / {Number(order.session_id.total_amount || 0).toFixed(0)}
-                </div>
-              ) : null}
-              {order.table_number ? (
-                <div className="text-xs text-gray-500">Table {order.table_number}</div>
-              ) : null}
             </div>
           </div>
         </div>
@@ -62,11 +54,6 @@ const OrderCard = ({ order, onStatusUpdate, updating }) => {
 
       {/* Items */}
       <div className="space-y-1.5">
-        {order.is_addition ? (
-          <div className="rounded-lg border border-brand-500/30 bg-brand-500/10 px-2 py-1 text-xs font-bold uppercase tracking-wide text-brand-400">
-            Addition to token #{order.token_number}
-          </div>
-        ) : null}
         {order.items?.map((item, i) => (
           <div key={i} className="flex items-center justify-between text-sm">
             <span className="text-white font-medium">{item.name}</span>
@@ -93,14 +80,14 @@ const OrderCard = ({ order, onStatusUpdate, updating }) => {
           {updating === order._id ? (
             <div className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin mx-auto" />
           ) : (
-            config.label
+            `✓ ${config.label}`
           )}
         </button>
       )}
 
       {order.kitchen_status === 'Ready' && (
         <div className="text-center text-xs text-green-400 font-semibold animate-pulse">
-          Customer notification sent
+          🔔 Notify customer sent
         </div>
       )}
     </div>
@@ -141,13 +128,12 @@ export default function KitchenScreen() {
   useEffect(() => {
     if (!franchiseId) return;
     joinFranchiseRoom(franchiseId);
-    joinKitchenRoom(franchiseId);
     const socket = getSocket();
     socket.on('order:new', (order) => {
       setOrders((prev) => {
         const exists = prev.find((o) => o._id === order._id);
         if (!exists) {
-          toast(order.is_addition ? `Addition to token #${order.token_number}` : 'New order arrived!');
+          toast('New order arrived!', { icon: '🔔' });
           return [order, ...prev];
         }
         return prev;
@@ -169,6 +155,18 @@ export default function KitchenScreen() {
         setOrders((prev) => prev.filter((o) => o._id !== orderId));
       } else {
         setOrders((prev) => prev.map((o) => o._id === orderId ? { ...o, kitchen_status: newStatus } : o));
+        // Emit token:ready event to display board when marked Ready
+        if (newStatus === 'Ready' && franchiseId) {
+          const order = orders.find((o) => o._id === orderId);
+          if (order) {
+            const socket = getSocket();
+            socket.emit('token:ready', {
+              franchiseId,
+              tokenNumber: order.token_number ? `TOKEN-${order.token_number}` : `#${order.order_number}`,
+              tableNumber: order.table_number || '',
+            });
+          }
+        }
       }
     } catch (err) {
       toast.error(err.response?.data?.message || 'Update failed');

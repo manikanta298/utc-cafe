@@ -83,27 +83,42 @@ app.use('/api/dashboard', require('./routes/dashboard'));
 app.use('/api/invoices', require('./routes/invoices'));
 app.use('/api/loyalty', require('./routes/loyalty'));
 app.use('/api/staff', require('./routes/staff'));
-app.use('/api/token-sessions', require('./routes/tokenSessions'));
+// New modules
+app.use('/api/sessions', require('./routes/sessions'));
+app.use('/api/coupons', require('./routes/coupons'));
+app.use('/api/tables', require('./routes/tables'));
+app.use('/api/payment-config', require('./routes/paymentConfig'));
+app.use('/api/audit', require('./routes/audit'));
+app.use('/api/reports', require('./routes/reports'));
 
 app.get('/api/health', (req, res) => res.json({ success: true, status: 'UTC Cafe API running' }));
 
+// Start archive cron job
+const { startArchiveCron } = require('./jobs/archiveOrders');
+startArchiveCron();
+
 io.on('connection', (socket) => {
+  // Kitchen room
   socket.on('join:franchise', (franchiseId) => {
     socket.join(`franchise:${franchiseId}`);
   });
-
+  // POS room
   socket.on('join:pos', (franchiseId) => {
     socket.join(`pos:${franchiseId}`);
   });
-
-  socket.on('join:kitchen', (franchiseId) => {
-    socket.join(`kitchen:${franchiseId}`);
-  });
-
+  // Token display board (TV/screen)
   socket.on('join:display', (franchiseId) => {
     socket.join(`display:${franchiseId}`);
   });
-
+  // Master admin room
+  socket.on('join:admin', () => {
+    socket.join('admin');
+  });
+  // Kitchen marks token ready -> display board + POS
+  socket.on('token:ready', ({ franchiseId, tokenNumber, tableNumber }) => {
+    io.to(`display:${franchiseId}`).emit('token:announce', { tokenNumber, tableNumber });
+    io.to(`pos:${franchiseId}`).emit('token:announce', { tokenNumber, tableNumber });
+  });
   socket.on('disconnect', () => {});
 });
 

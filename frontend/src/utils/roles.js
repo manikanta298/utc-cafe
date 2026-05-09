@@ -1,10 +1,16 @@
 export const PERMISSIONS = {
   master_admin: ['*'],
-  franchise_owner: ['reports', 'inventory', 'customer_analytics', 'payment_reports', 'franchise_dashboard', 'pos', 'kitchen'],
-  manager: ['pos', 'reports', 'inventory', 'billing', 'franchise_dashboard', 'kitchen'],
-  pos_staff: ['pos', 'billing', 'order_placement', 'order_history'],
-  pos_shift_operator: ['pos', 'billing', 'order_history'],
-  shift_operator: ['pos', 'billing', 'order_history'],
+  franchise_owner: [
+    'reports', 'inventory', 'customer_analytics', 'payment_reports',
+    'franchise_dashboard', 'pos', 'kitchen', 'tables', 'order_history',
+  ],
+  manager: [
+    'pos', 'reports', 'inventory', 'billing', 'franchise_dashboard',
+    'kitchen', 'tables', 'order_history', 'order_placement',
+  ],
+  pos_staff: ['pos', 'billing', 'order_placement', 'order_history', 'tables'],
+  pos_shift_operator: ['pos', 'billing', 'order_history', 'tables'],
+  shift_operator: ['pos', 'billing', 'order_history', 'tables'],
   kitchen_staff: ['kitchen_dashboard'],
 };
 

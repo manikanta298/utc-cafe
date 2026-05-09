@@ -4,7 +4,6 @@ const invoiceSchema = new mongoose.Schema(
   {
     invoice_no: { type: String, required: true, unique: true }, // FR01-INV-001
     order_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Order', required: true },
-    session_id: { type: mongoose.Schema.Types.ObjectId, ref: 'TokenSession', default: null },
     franchise_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Franchise', required: true },
     customer_id: { type: mongoose.Schema.Types.ObjectId, ref: 'Customer', required: true },
 
@@ -28,11 +27,6 @@ const invoiceSchema = new mongoose.Schema(
     final_amount: { type: Number, required: true },
 
     payment_mode: { type: String },
-    payment_status: {
-      type: String,
-      enum: ['Pending', 'Advance Paid', 'Partially Paid', 'Fully Paid'],
-      default: 'Pending',
-    },
 
     // Items snapshot for invoice
     items: [
