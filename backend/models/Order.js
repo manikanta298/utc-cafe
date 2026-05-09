@@ -36,7 +36,11 @@ const orderSchema = new mongoose.Schema(
 
     // Payment
     payment_mode: { type: String, enum: ['Cash', 'Card', 'UPI', 'Net Banking'], required: true },
-    payment_status: { type: String, enum: ['Pending', 'Paid', 'Refunded'], default: 'Paid' },
+    payment_status: {
+      type: String,
+      enum: ['Pending', 'Advance Paid', 'Partially Paid', 'Fully Paid', 'Refunded'],
+      default: 'Pending',
+    },
 
     // Kitchen status
     kitchen_status: {

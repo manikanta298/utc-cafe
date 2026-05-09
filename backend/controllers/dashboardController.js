@@ -4,6 +4,9 @@ const Franchise = require('../models/Franchise');
 const Invoice = require('../models/Invoice');
 const User = require('../models/User');
 
+const FULLY_PAID_ORDER_STATUS = 'Fully Paid';
+const COLLECTED_ORDER_STATUSES = ['Advance Paid', 'Partially Paid', 'Fully Paid'];
+
 // Helper: date range
 const getDateRange = (period) => {
   const now = new Date();
@@ -33,7 +36,7 @@ const getFranchiseDashboard = async (req, res) => {
     ] = await Promise.all([
       Order.countDocuments({ franchise_id: franchiseId, createdAt: dateRange }),
       Order.aggregate([
-        { $match: { franchise_id: franchiseId, payment_status: 'Paid', createdAt: dateRange } },
+        { $match: { franchise_id: franchiseId, payment_status: FULLY_PAID_ORDER_STATUS, createdAt: dateRange } },
         { $group: { _id: null, total: { $sum: '$final_amount' } } },
       ]),
       Order.countDocuments({ franchise_id: franchiseId, kitchen_status: { $in: ['Pending', 'Accepted', 'Preparing'] } }),
@@ -52,9 +55,15 @@ const getFranchiseDashboard = async (req, res) => {
       User.countDocuments({ franchise_id: franchiseId, isActive: true }),
     ]);
 
+    const partiallyCollectedOrders = await Order.countDocuments({
+      franchise_id: franchiseId,
+      payment_status: { $in: COLLECTED_ORDER_STATUSES },
+      createdAt: dateRange,
+    });
+
     // Revenue chart (last 7 days)
     const revenueChart = await Order.aggregate([
-      { $match: { franchise_id: franchiseId, payment_status: 'Paid', createdAt: getDateRange('week') } },
+      { $match: { franchise_id: franchiseId, payment_status: FULLY_PAID_ORDER_STATUS, createdAt: getDateRange('week') } },
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -85,6 +94,7 @@ const getFranchiseDashboard = async (req, res) => {
       data: {
         totalOrders,
         totalRevenue: totalRevenue[0]?.total || 0,
+        partiallyCollectedOrders,
         pendingOrders,
         todayOrders,
         topItems,
@@ -118,11 +128,11 @@ const getMasterDashboard = async (req, res) => {
       Customer.countDocuments(),
       Order.countDocuments({ createdAt: dateRange }),
       Order.aggregate([
-        { $match: { payment_status: 'Paid', createdAt: dateRange } },
+        { $match: { payment_status: FULLY_PAID_ORDER_STATUS, createdAt: dateRange } },
         { $group: { _id: null, total: { $sum: '$final_amount' } } },
       ]),
       Order.aggregate([
-        { $match: { payment_status: 'Paid', createdAt: dateRange } },
+        { $match: { payment_status: FULLY_PAID_ORDER_STATUS, createdAt: dateRange } },
         {
           $group: {
             _id: '$franchise_id',
@@ -160,9 +170,14 @@ const getMasterDashboard = async (req, res) => {
       ]),
     ]);
 
+    const partiallyCollectedOrders = await Order.countDocuments({
+      payment_status: { $in: COLLECTED_ORDER_STATUSES },
+      createdAt: dateRange,
+    });
+
     // Revenue trend
     const revenueTrend = await Order.aggregate([
-      { $match: { payment_status: 'Paid', createdAt: getDateRange('month') } },
+      { $match: { payment_status: FULLY_PAID_ORDER_STATUS, createdAt: getDateRange('month') } },
       {
         $group: {
           _id: { $dateToString: { format: '%Y-%m-%d', date: '$createdAt' } },
@@ -180,6 +195,7 @@ const getMasterDashboard = async (req, res) => {
         totalCustomers,
         totalOrders,
         totalRevenue: totalRevenue[0]?.total || 0,
+        partiallyCollectedOrders,
         franchisePerformance,
         recentOrders,
         gstConsolidated,

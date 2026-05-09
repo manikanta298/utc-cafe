@@ -13,6 +13,7 @@ import {
   X,
   History,
   Lock,
+  MonitorSmartphone,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import useAuthStore from '../../store/authStore';
@@ -36,6 +37,7 @@ const FRANCHISE_NAV = [
   { to: '/franchise/invoices', icon: FileText, label: 'Reports' },
   { to: '/pos', icon: Receipt, label: 'POS Billing', matchPaths: ['/pos', '/pos/history'] },
   { to: '/kitchen', icon: ChefHat, label: 'Kitchen' },
+  { to: '/display-board', icon: MonitorSmartphone, label: 'Ready Board' },
 ];
 
 const POS_NAV = [
@@ -45,6 +47,7 @@ const POS_NAV = [
 
 const KITCHEN_NAV = [
   { to: '/kitchen', icon: ChefHat, label: 'Kitchen' },
+  { to: '/display-board', icon: MonitorSmartphone, label: 'Ready Board' },
 ];
 
 const ROLE_LABELS = {

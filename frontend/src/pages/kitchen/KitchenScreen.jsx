@@ -2,7 +2,7 @@ import { useEffect, useState, useRef } from 'react';
 import { Coffee, ChefHat, Clock, CheckCircle, LogOut, RefreshCw, Volume2, VolumeX } from 'lucide-react';
 import api from '../../lib/api';
 import useAuthStore from '../../store/authStore';
-import { joinFranchiseRoom, getSocket } from '../../lib/socket';
+import { joinFranchiseRoom, joinKitchenRoom, getSocket } from '../../lib/socket';
 import toast from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { formatDistanceToNow } from 'date-fns';
@@ -42,6 +42,11 @@ const OrderCard = ({ order, onStatusUpdate, updating }) => {
             <div>
               <div className="text-xs font-mono text-gray-500">{order.order_number}</div>
               <div className="text-sm font-semibold text-white">{order.customer_id?.name}</div>
+              {order.session_id?.payment_status ? (
+                <div className="mt-1 text-[11px] text-gray-500">
+                  {order.session_id.payment_status} · Rs. {Number(order.session_id.amount_paid || 0).toFixed(0)} / {Number(order.session_id.total_amount || 0).toFixed(0)}
+                </div>
+              ) : null}
               {order.table_number ? (
                 <div className="text-xs text-gray-500">Table {order.table_number}</div>
               ) : null}
@@ -136,6 +141,7 @@ export default function KitchenScreen() {
   useEffect(() => {
     if (!franchiseId) return;
     joinFranchiseRoom(franchiseId);
+    joinKitchenRoom(franchiseId);
     const socket = getSocket();
     socket.on('order:new', (order) => {
       setOrders((prev) => {

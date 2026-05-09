@@ -96,6 +96,14 @@ io.on('connection', (socket) => {
     socket.join(`pos:${franchiseId}`);
   });
 
+  socket.on('join:kitchen', (franchiseId) => {
+    socket.join(`kitchen:${franchiseId}`);
+  });
+
+  socket.on('join:display', (franchiseId) => {
+    socket.join(`display:${franchiseId}`);
+  });
+
   socket.on('disconnect', () => {});
 });
 

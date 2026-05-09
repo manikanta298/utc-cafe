@@ -275,6 +275,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
     setCustomer(null);
     setRecentOrders([]);
     setCustomerInsights(emptyInsights);
+    setActiveTokenSession(null);
     setPhone('');
     setNewCustName('');
     setNewCustGender('');
@@ -300,6 +301,17 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   const downloadReceiptPdf = async (invoiceId, invoiceNo) => {
     const res = await api.get(`/invoices/${invoiceId}/pdf`, { responseType: 'blob' });
     downloadBlob(res.data, 'application/pdf', `${invoiceNo || 'invoice'}.pdf`);
+  };
+
+  const openMergedReceipt = async (sessionId) => {
+    const res = await api.get(`/token-sessions/${sessionId}/receipt`, { responseType: 'text' });
+    const url = URL.createObjectURL(new Blob([res.data], { type: 'text/html' }));
+    window.open(url, '_blank', 'noopener,noreferrer');
+  };
+
+  const downloadMergedReceiptPdf = async (sessionId, tokenLabel) => {
+    const res = await api.get(`/token-sessions/${sessionId}/pdf`, { responseType: 'blob' });
+    downloadBlob(res.data, 'application/pdf', `${tokenLabel || 'session-bill'}.pdf`);
   };
 
   const subTotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
@@ -359,6 +371,7 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
         points_to_redeem: redeemPoints ? pointsToRedeem : 0,
       });
 
+      setActiveTokenSession(res.data.tokenSession || null);
       setOrderResult(res.data);
       setStep('success');
       toast.success(`Order ${res.data.order.order_number} placed`);
@@ -371,6 +384,24 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
 
   const historyPhone = historySearch.trim().replace(/\D/g, '').slice(0, 10);
   const showShellHeader = !embedded;
+
+  useEffect(() => {
+    if (!franchiseId) return undefined;
+    const socket = getSocket();
+
+    const handleTokenUpdate = (payload) => {
+      setActiveTokenSession((current) => {
+        if (!current) return current;
+        const currentId = current._id || current.sessionId;
+        if (!currentId || currentId.toString() !== payload.sessionId?.toString()) return current;
+        if (payload.status === 'Closed') return null;
+        return { ...current, ...payload, _id: currentId };
+      });
+    };
+
+    socket.on('token:updated', handleTokenUpdate);
+    return () => socket.off('token:updated', handleTokenUpdate);
+  }, [franchiseId]);
 
   const searchHistory = async () => {
     if (!historySearch.trim()) return;
@@ -595,7 +626,9 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
   );
 
   if (step === 'success' && orderResult) {
-    const { order, invoice, customer: updatedCustomer } = orderResult;
+    const { order, invoice, tokenSession, customer: updatedCustomer } = orderResult;
+    const collectedAmount = Number(tokenSession?.amount_paid || amountPaid || order.final_amount || 0);
+    const outstandingAmount = Math.max(0, +(Number(tokenSession?.total_amount || order.final_amount || 0) - collectedAmount).toFixed(2));
 
     return (
       <div className={`${embedded ? '' : 'min-h-screen'} flex items-center justify-center`}>
@@ -608,11 +641,13 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
 
           <div className="mb-6 space-y-2 rounded-xl bg-dark-700 p-4 text-left">
             <div className="flex justify-between text-sm"><span className="text-gray-500">Order #</span><span className="font-mono text-brand-400">{order.order_number}</span></div>
-            <div className="flex justify-between text-sm"><span className="text-gray-500">Token</span><span className="text-lg font-bold text-white">#{order.token_number}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-gray-500">Token</span><span className="text-lg font-bold text-white">{tokenSession?.token_label || `#${order.token_number}`}</span></div>
             <div className="flex justify-between text-sm"><span className="text-gray-500">Invoice</span><span className="font-mono text-gray-300">{invoice.invoice_no}</span></div>
             <div className="flex justify-between text-sm"><span className="text-gray-500">Payment</span><span className="text-green-400">{order.payment_mode}</span></div>
+            <div className="flex justify-between text-sm"><span className="text-gray-500">Session Status</span><span className="text-gray-300">{tokenSession?.payment_status || order.payment_status}</span></div>
             <div className="border-t border-dark-500 pt-2">
-              <div className="flex justify-between"><span className="text-gray-500">Amount Paid</span><span className="text-lg font-bold text-green-400">{formatMoney(order.final_amount)}</span></div>
+              <div className="flex justify-between"><span className="text-gray-500">Collected</span><span className="text-lg font-bold text-green-400">{formatMoney(collectedAmount)}</span></div>
+              <div className="mt-1 flex justify-between"><span className="text-gray-500">Outstanding</span><span className="font-semibold text-yellow-400">{formatMoney(outstandingAmount)}</span></div>
             </div>
           </div>
 
@@ -636,6 +671,22 @@ export default function POSScreen({ mode = 'billing', embedded = false }) {
             <button onClick={() => downloadReceiptPdf(invoice._id, invoice.invoice_no)} className="btn-ghost px-4 flex items-center gap-2">
               <Download size={16} />
             </button>
+            {tokenSession?._id ? (
+              <>
+                <button
+                  onClick={() => openMergedReceipt(tokenSession._id)}
+                  className="btn-ghost px-4 text-xs"
+                >
+                  Merged Bill
+                </button>
+                <button
+                  onClick={() => downloadMergedReceiptPdf(tokenSession._id, tokenSession.token_label)}
+                  className="btn-ghost px-4 text-xs"
+                >
+                  Merged PDF
+                </button>
+              </>
+            ) : null}
           </div>
         </div>
       </div>

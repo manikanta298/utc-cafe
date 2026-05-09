@@ -164,7 +164,7 @@ const createOrder = async (req, res) => {
       final_amount: finalAmount,
       tax_type: taxType,
       payment_mode,
-      payment_status: normalizedPaymentStatus === 'Fully Paid' ? 'Paid' : 'Pending',
+      payment_status: normalizedPaymentStatus,
       kitchen_status: 'Pending',
       token_number: session.token_number,
       token_label: session.token_label,
@@ -275,6 +275,23 @@ const createOrder = async (req, res) => {
       .populate('customer_id', 'name phone_no')
       .populate('franchise_id', 'name franchiseCode');
     io.to(`franchise:${franchise._id}`).emit('order:new', populatedOrder);
+    io.to(`pos:${franchise._id}`).emit('order:new', populatedOrder);
+    io.to(`kitchen:${franchise._id}`).emit('order:new', populatedOrder);
+    io.to(`display:${franchise._id}`).emit('token:updated', {
+      sessionId: session._id,
+      tokenLabel: session.token_label,
+      tokenNumber: session.token_number,
+      tableNumber: session.table_number,
+      status: session.status,
+      paymentStatus: session.payment_status,
+      totalAmount: session.total_amount,
+      amountPaid: session.amount_paid,
+      outstandingAmount: +(Number(session.total_amount || 0) - Number(session.amount_paid || 0)).toFixed(2),
+      orderId: order._id,
+      kitchenStatus: order.kitchen_status,
+      isAddition,
+      updatedAt: new Date(),
+    });
 
     // SMS — Order placed notification (non-blocking)
     sendOrderPlaced(

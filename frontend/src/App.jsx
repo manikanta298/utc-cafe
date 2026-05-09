@@ -17,6 +17,7 @@ import FranchiseStaffPage from './pages/franchise/FranchiseStaffPage';
 import FranchiseOrdersPage from './pages/franchise/FranchiseOrdersPage';
 import POSScreen from './pages/pos/POSScreen';
 import KitchenScreen from './pages/kitchen/KitchenScreen';
+import ReadyBoardScreen from './pages/display/ReadyBoardScreen';
 import UnauthorizedPage from './pages/UnauthorizedPage';
 
 // Layouts
@@ -111,6 +112,14 @@ export default function App() {
             <KitchenScreen />
           </ProtectedRoute>
         } />
+
+        <Route path="/display-board" element={
+          <ProtectedRoute roles={['kitchen_staff', 'manager', 'franchise_owner', 'master_admin']}>
+            <AppLayout />
+          </ProtectedRoute>
+        }>
+          <Route index element={<ReadyBoardScreen />} />
+        </Route>
 
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
