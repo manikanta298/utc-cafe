@@ -139,6 +139,6 @@ router.post('/seed-demo', async (req, res) => {
   }
 });
 
-router.post('/verify-edit-pin', protect, authorise('master_admin', 'franchise_owner', 'manager', 'pos_staff', 'shift_operator'), verifyEditPin);
+router.post('/verify-edit-pin', protect, authorise('master_admin', 'franchise_owner', 'manager', 'pos_staff', 'shift_operator', 'waiter'), verifyEditPin);
 
 module.exports = router;

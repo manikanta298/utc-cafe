@@ -182,8 +182,36 @@ export default function WaiterDashboard() {
       return ex ? p.map(c => c._id === item._id ? { ...c, qty: c.qty + 1 } : c) : [...p, { ...item, qty: 1 }];
     });
   const setQty = (id, delta) =>
-    setCart(p => p.map(c => c._id === id ? { ...c, qty: Math.max(0, c.qty + delta) } : c).filter(c => c.qty > 0));
+    setCart(p => p.map(c => c._id === id ? { ...c, qty: Math.max(1, c.qty + delta) } : c));
   const removeItem = (id) => setCart(p => p.filter(c => c._id !== id));
+
+  // ── PIN-gated deletion (franchise owner's edit PIN) ─────────────
+  const [pinModal, setPinModal]     = useState(null); // { onConfirm } | null
+  const [pinValue, setPinValue]     = useState('');
+  const [pinError, setPinError]     = useState('');
+  const [pinChecking, setPinChecking] = useState(false);
+
+  const requestDelete = (onConfirm) => {
+    setPinValue(''); setPinError('');
+    setPinModal({ onConfirm });
+  };
+
+  const confirmPin = async () => {
+    if (!pinValue) return;
+    setPinChecking(true);
+    setPinError('');
+    try {
+      const fid = user?.franchise_id?._id || user?.franchise_id;
+      await api.post('/auth/verify-edit-pin', { pin: pinValue, franchise_id: fid });
+      pinModal?.onConfirm?.();
+      setPinModal(null);
+      setPinValue('');
+    } catch (e) {
+      setPinError(e.response?.data?.message || 'Incorrect PIN');
+    } finally {
+      setPinChecking(false);
+    }
+  };
 
   const subtotal   = cart.reduce((s, c) => s + c.price * c.qty, 0);
   const gst        = cart.reduce((s, c) => s + c.price * c.qty * (c.gst_rate || 5) / 100, 0);
@@ -390,6 +418,11 @@ export default function WaiterDashboard() {
                   </svg>
                   <span className="text-white font-bold text-xs">T{t.tableNumber}</span>
                   <span className={`text-[10px] ${cfg.text}`}>{t.capacity} Seats</span>
+                  {t.currentSessionId?.status === 'pending_pos' && (
+                    <span className="absolute -top-2 left-1/2 -translate-x-1/2 text-[8px] font-bold uppercase bg-amber-500 text-black px-1.5 py-0.5 rounded-full whitespace-nowrap animate-pulse">
+                      Approval Pending
+                    </span>
+                  )}
                   {t.status !== 'available' && (
                     <span className={`absolute top-1.5 right-1.5 w-2 h-2 rounded-full ${cfg.dot} ${t.status === 'occupied' ? 'animate-pulse' : ''}`} />
                   )}
@@ -661,6 +694,12 @@ export default function WaiterDashboard() {
             <div className="text-xs text-gray-400">{foundCust?.name || newCustName}</div>
           )}
         </div>
+        {orderType === 'dine_in' && selectedTable && (
+          <button onClick={() => { setBillTable(selectedTable); setScreen('billRequest'); }}
+            className="flex items-center gap-1.5 border border-[#333] text-gray-300 hover:bg-[#252525] text-xs font-semibold px-3 py-2 rounded-xl transition-colors">
+            <Receipt size={14} /> Request Bill
+          </button>
+        )}
         {cartCount > 0 && (
           <button onClick={() => setScreen('cart')}
             className="relative flex items-center gap-1.5 bg-orange-500 hover:bg-orange-400 text-white text-xs font-bold px-3 py-2 rounded-xl transition-colors">
@@ -775,7 +814,7 @@ export default function WaiterDashboard() {
           </div>
           <div className="text-gray-400 text-xs">{selectedTable?.capacity} Seats</div>
         </div>
-        <button onClick={() => setCart([])} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
+        <button onClick={() => requestDelete(() => setCart([]))} className="text-xs text-red-400 hover:text-red-300 flex items-center gap-1">
           <Trash2 size={12} /> Clear
         </button>
       </div>
@@ -803,6 +842,9 @@ export default function WaiterDashboard() {
               <span className="text-white text-xs font-bold w-4 text-center">{item.qty}</span>
               <button onClick={() => setQty(item._id, 1)} className="w-6 h-6 rounded-lg bg-orange-500 text-white flex items-center justify-center hover:bg-orange-400">
                 <Plus size={10} />
+              </button>
+              <button onClick={() => requestDelete(() => removeItem(item._id))} className="w-6 h-6 rounded-lg bg-red-500/15 text-red-400 flex items-center justify-center hover:bg-red-500/25">
+                <Trash2 size={10} />
               </button>
             </div>
             <div className="col-span-2 text-right text-white text-xs font-bold">{fmt(item.price * item.qty)}</div>
@@ -833,7 +875,7 @@ export default function WaiterDashboard() {
 
       {/* Actions */}
       <div className="px-4 py-4 border-t border-[#2a2a2a] flex gap-3">
-        <button onClick={() => { setCart([]); goHome(); }}
+        <button onClick={() => requestDelete(() => { setCart([]); goHome(); })}
           className="flex-1 py-3 border border-[#333] text-gray-300 font-bold rounded-xl text-sm hover:bg-[#252525] transition-colors">
           CLEAR CART
         </button>
@@ -1594,6 +1636,40 @@ export default function WaiterDashboard() {
               className="w-full py-2.5 border border-[#2a2a2a] text-gray-500 rounded-xl text-sm hover:bg-[#1a1a1a] transition-colors">
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── PIN verification (required to delete cart items) ── */}
+      {pinModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm"
+          onClick={() => setPinModal(null)}>
+          <div className="w-full sm:w-80 mx-4 bg-[#161616] border border-[#2a2a2a] rounded-2xl p-6 shadow-2xl"
+            onClick={e => e.stopPropagation()}>
+            <h2 className="text-white font-bold text-base text-center mb-1">Enter PIN to Delete</h2>
+            <p className="text-gray-500 text-xs text-center mb-4">Franchise owner's PIN is required to remove items</p>
+            <input
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              autoFocus
+              value={pinValue}
+              onChange={e => { setPinValue(e.target.value.replace(/\D/g, '')); setPinError(''); }}
+              onKeyDown={e => e.key === 'Enter' && confirmPin()}
+              placeholder="••••"
+              className="w-full text-center tracking-[0.5em] text-lg bg-[#1e1e1e] border border-[#2e2e2e] rounded-xl py-3 text-white outline-none focus:border-orange-500 mb-2"
+            />
+            {pinError && <div className="text-red-400 text-xs text-center mb-2">{pinError}</div>}
+            <div className="flex gap-3 mt-3">
+              <button onClick={() => setPinModal(null)}
+                className="flex-1 py-2.5 border border-[#2a2a2a] text-gray-400 rounded-xl text-sm hover:bg-[#1a1a1a] transition-colors">
+                Cancel
+              </button>
+              <button onClick={confirmPin} disabled={pinChecking || !pinValue}
+                className="flex-1 py-2.5 bg-red-500 hover:bg-red-400 disabled:opacity-50 text-white font-bold rounded-xl text-sm transition-colors">
+                {pinChecking ? 'Checking…' : 'Confirm Delete'}
+              </button>
+            </div>
           </div>
         </div>
       )}
