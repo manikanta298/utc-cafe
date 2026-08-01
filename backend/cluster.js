@@ -10,6 +10,14 @@
  *
  * In development (or single-process environments like Render free tier):
  *   node server.js
+ *
+ * Socket.IO note: server.js attaches a Redis adapter automatically when
+ * REDIS_URL is set, so real-time events/rooms are shared across these
+ * workers. If you also put a reverse proxy/load balancer in front of
+ * multiple *instances* (not just these in-process workers), enable
+ * sticky sessions there too — the Redis adapter shares state but a
+ * client's individual HTTP polling requests still need to reach a
+ * worker that has its live WebSocket/session context.
  */
 
 const cluster = require('cluster');

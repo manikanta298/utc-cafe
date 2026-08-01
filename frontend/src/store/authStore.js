@@ -13,10 +13,8 @@ const useAuthStore = create((set, get) => ({
     try {
       const { data } = await api.post('/auth/login', { email, password });
       localStorage.setItem('utc_token', data.token);
-      // ── BUG FIX: explicitly persist refresh token from login response body
-      // The api.js interceptor does this too, but doing it here ensures the
-      // token is always saved even if the interceptor order changes
-      if (data.refreshToken) localStorage.setItem('utc_refresh_token', data.refreshToken);
+      // SECURITY: refresh token is never in the response body — it lives
+      // only in the HttpOnly cookie the browser stores automatically.
       api.defaults.headers.common.Authorization = `Bearer ${data.token}`;
       set({ user: data.user, token: data.token, loading: false });
       return { success: true, user: data.user };
@@ -39,28 +37,19 @@ const useAuthStore = create((set, get) => ({
       // Ignore logout network errors — clear local state regardless.
     }
     localStorage.removeItem('utc_token');
-    localStorage.removeItem('utc_refresh_token');
     delete api.defaults.headers.common.Authorization;
     set({ user: null, token: null, initializing: false });
   },
 
   refreshSession: async () => {
     try {
-      const storedRt = localStorage.getItem('utc_refresh_token');
-      const { data } = await api.post(
-        '/auth/refresh',
-        storedRt ? { refreshToken: storedRt } : {},
-        storedRt ? { headers: { Authorization: `Refresh ${storedRt}` } } : {}
-      );
+      // Refresh token cookie is sent automatically (withCredentials: true).
+      const { data } = await api.post('/auth/refresh');
       localStorage.setItem('utc_token', data.token);
-      // Update stored refresh token if a new one was issued
-      const newRt = data.refreshToken;
-      if (newRt) localStorage.setItem('utc_refresh_token', newRt);
       api.defaults.headers.common.Authorization = `Bearer ${data.token}`;
       set({ user: data.user, token: data.token });
       return data.token;
     } catch {
-      localStorage.removeItem('utc_refresh_token');
       await get().logout();
       return null;
     }

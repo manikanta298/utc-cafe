@@ -77,17 +77,10 @@ const authorise = (...roles) => checkRole(...roles);
 const protectRefreshToken = (req, res, next) => {
   const cookies = parseCookies(req.headers.cookie);
 
-  let refreshToken = cookies.utc_refresh_token;
-
-  if (!refreshToken && req.headers.authorization?.startsWith('Refresh ')) {
-    refreshToken = req.headers.authorization.split(' ')[1];
-  }
-  if (!refreshToken && req.body?.refreshToken) {
-    refreshToken = req.body.refreshToken;
-  }
+  const refreshToken = cookies.utc_refresh_token;
 
   if (!refreshToken) {
-    console.warn('[auth] refresh 401: no refresh token in cookie/header/body');
+    console.warn('[auth] refresh 401: no refresh token cookie');
     return res.status(401).json({ success: false, message: 'Refresh token missing' });
   }
 

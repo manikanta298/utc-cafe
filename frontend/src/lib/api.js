@@ -25,25 +25,13 @@ let isRedirecting  = false; // ── BUG FIX: prevent duplicate redirect race
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('utc_token');
   if (token) config.headers.Authorization = `Bearer ${token}`;
-
-  // ── SECURITY FIX: attach stored refresh token in header for cross-origin fallback
-  const refreshToken = localStorage.getItem('utc_refresh_token');
-  if (refreshToken && config.url?.includes('/auth/refresh')) {
-    config.headers.Authorization = `Refresh ${refreshToken}`;
-    config.data = { ...config.data, refreshToken };
-  }
-
+  // Refresh token is sent automatically via the HttpOnly cookie
+  // (withCredentials: true) — never read/attached from JS.
   return config;
 });
 
 api.interceptors.response.use(
-  (res) => {
-    // ── BUG FIX: persist refresh token from response header/body if provided
-    const xRefresh = res.headers?.['x-refresh-token'];
-    if (xRefresh) localStorage.setItem('utc_refresh_token', xRefresh);
-    if (res.data?.refreshToken) localStorage.setItem('utc_refresh_token', res.data.refreshToken);
-    return res;
-  },
+  (res) => res,
   async (err) => {
     // Surface franchise-inactive 403s
     if (err.response?.status === 403) {
@@ -71,7 +59,6 @@ api.interceptors.response.use(
           refreshPromise = refreshPromise || api.post('/auth/refresh');
           const { data } = await refreshPromise;
           localStorage.setItem('utc_token', data.token);
-          if (data.refreshToken) localStorage.setItem('utc_refresh_token', data.refreshToken);
           refreshPromise = null;
           err.config.__isRetryRequest = true;
           err.config.headers.Authorization = `Bearer ${data.token}`;
@@ -83,7 +70,6 @@ api.interceptors.response.use(
 
       // Refresh failed — clear session
       localStorage.removeItem('utc_token');
-      localStorage.removeItem('utc_refresh_token');
       delete api.defaults.headers.common.Authorization;
 
       const isPublicPage = window.location.pathname.startsWith('/menu/') ||

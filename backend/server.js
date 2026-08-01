@@ -59,10 +59,8 @@ const corsOptions = {
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  // ── BUG FIX: expose X-Refresh-Token so the frontend interceptor can read it
-  // Without this, browsers block JS access to the header → refresh token never
-  // stored in localStorage → all token refresh calls fail with 401
-  exposedHeaders: ['X-Refresh-Token'],
+  // SECURITY: refresh token lives only in the HttpOnly cookie — never
+  // exposed via a readable header, so nothing needs to be in exposedHeaders.
   maxAge: 86400, // cache preflight for 24h — reduces OPTIONS requests
 };
 
@@ -85,6 +83,26 @@ const io = new Server(server, {
 
 app.set('io', io);
 app.set('trust proxy', 1);
+
+// ── Audit fix: attach the Redis adapter so Socket.IO rooms/events work
+// correctly across multiple cluster workers or instances (requires
+// sticky sessions at the load balancer). Without REDIS_URL, Socket.IO
+// keeps working normally in single-process mode — it just won't be
+// shared across workers, same as before this fix.
+if (process.env.REDIS_URL) {
+  (async () => {
+    try {
+      const { getRedisClient } = require('./utils/redisClient');
+      const { createAdapter } = require('@socket.io/redis-adapter');
+      const pubClient = getRedisClient();
+      const subClient = pubClient.duplicate();
+      io.adapter(createAdapter(pubClient, subClient));
+      console.log('[socket.io] Redis adapter attached — events are now shared across workers/instances');
+    } catch (err) {
+      console.warn('[socket.io] failed to attach Redis adapter, staying single-process:', err.message);
+    }
+  })();
+}
 
 // ── SECURITY: Helmet with strict CSP
 app.use(helmet({
@@ -129,6 +147,11 @@ if (process.env.NODE_ENV !== 'production') {
 }
 
 // ── RATE LIMITING
+// Audit fix: Redis-backed store when REDIS_URL is configured, so limits
+// are shared across worker processes/instances instead of resetting
+// per-process. Falls back to in-memory automatically if Redis isn't set.
+const { createRateLimitStore } = require('./utils/rateLimitStore');
+
 const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 20,
@@ -136,6 +159,7 @@ const authLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => req.path === '/seed-demo',
   message: { success: false, message: 'Too many authentication attempts. Please try again later.' },
+  store: createRateLimitStore('auth'),
 });
 
 // General API rate limiter — 300 req/min per IP
@@ -146,6 +170,7 @@ const apiLimiter = rateLimit({
   legacyHeaders: false,
   skip: (req) => req.path === '/api/health',
   message: { success: false, message: 'Too many requests, please slow down.' },
+  store: createRateLimitStore('api'),
 });
 app.use('/api', apiLimiter);
 
@@ -171,6 +196,7 @@ const publicLimiter = rateLimit({
   windowMs: 60 * 1000,
   max: 30,
   message: { success: false, message: 'Too many requests, please slow down.' },
+  store: createRateLimitStore('public'),
 });
 app.use('/api/public', publicLimiter, require('./routes/public'));
 app.use('/api/reports',       require('./routes/reports'));

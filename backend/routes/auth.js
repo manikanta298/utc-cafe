@@ -5,6 +5,7 @@ const {
 } = require('../controllers/authController');
 const { protect, authorise, protectRefreshToken } = require('../middleware/auth');
 const rateLimit = require('express-rate-limit');
+const { createRateLimitStore } = require('../utils/rateLimitStore');
 
 const router = express.Router();
 
@@ -15,12 +16,14 @@ const loginLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { success: false, message: 'Too many login attempts. Please try again after 15 minutes.' },
+  store: createRateLimitStore('login'),
 });
 
 const forgotPasswordLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,  // 1 hour
   max: 5,
   message: { success: false, message: 'Too many password reset requests. Please try again later.' },
+  store: createRateLimitStore('forgot-password'),
 });
 
 router.post(
@@ -57,12 +60,24 @@ router.put(
   changePassword
 );
 
+// SECURITY: bootstrap/seed/purge utilities are destructive and must never
+// be reachable in production, regardless of secret-key correctness.
+const devOnly = (req, res, next) => {
+  if (process.env.NODE_ENV === 'production') {
+    return res.status(404).json({ success: false, message: 'Not found' });
+  }
+  next();
+};
+
 // ── SECURITY FIX: setup-master requires env-configured key only (no hardcoded fallback)
-router.post('/setup-master', async (req, res) => {
+router.post('/setup-master', devOnly, async (req, res) => {
   try {
     const { setupKey } = req.body;
     if (!process.env.SETUP_KEY || setupKey !== process.env.SETUP_KEY) {
       return res.status(403).json({ success: false, message: 'Invalid setup key' });
+    }
+    if (!process.env.MASTER_PASSWORD) {
+      return res.status(500).json({ success: false, message: 'MASTER_PASSWORD env var must be set — refusing to create an admin with a default password' });
     }
 
     const User = require('../models/User');
@@ -71,7 +86,7 @@ router.post('/setup-master', async (req, res) => {
     const admin = await User.create({
       name: 'Master Admin',
       email: process.env.MASTER_EMAIL || 'admin@utccafe.com',
-      password: process.env.MASTER_PASSWORD || 'Admin@1234',
+      password: process.env.MASTER_PASSWORD,
       role: 'master_admin',
       phone: '9000000000',
     });
@@ -84,8 +99,8 @@ router.post('/setup-master', async (req, res) => {
 router.post('/forgot-password', forgotPasswordLimiter, forgotPassword);
 router.post('/reset-password', resetPassword);
 
-// Delete all customer + session data — master_admin only
-router.delete('/purge-test-data', protect, authorise('master_admin'), async (req, res) => {
+// Delete all customer + session data — master_admin only, dev/staging only
+router.delete('/purge-test-data', devOnly, protect, authorise('master_admin'), async (req, res) => {
   try {
     const Customer      = require('../models/Customer');
     const OrderSession  = require('../models/OrderSession');
@@ -101,8 +116,8 @@ router.delete('/purge-test-data', protect, authorise('master_admin'), async (req
   } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 });
 
-// seed-demo — creates demo accounts (only via secret key)
-router.post('/seed-demo', async (req, res) => {
+// seed-demo — creates demo accounts (only via secret key, dev/staging only)
+router.post('/seed-demo', devOnly, async (req, res) => {
   try {
     const { secret } = req.body;
     if (!process.env.SEED_SECRET || secret !== process.env.SEED_SECRET) {
@@ -116,13 +131,14 @@ router.post('/seed-demo', async (req, res) => {
 
     await Promise.all([User.deleteMany({}), Franchise.deleteMany({}), MenuItem.deleteMany({}), Customer.deleteMany({})]);
 
-    await User.create({ name: 'Master Admin', email: process.env.MASTER_EMAIL || 'admin@utccafe.com', password: 'Admin@1234', role: 'master_admin', phone: '9000000000' });
+    const demoPassword = process.env.SEED_DEMO_PASSWORD || 'Admin@1234';
+    await User.create({ name: 'Master Admin', email: process.env.MASTER_EMAIL || 'admin@utccafe.com', password: demoPassword, role: 'master_admin', phone: '9000000000' });
 
     const f1 = await Franchise.create({ name: 'UTC Café — Chennai Central', location: 'Anna Salai, Chennai', city: 'Chennai', state: 'Tamil Nadu', gstin: '33AABCU9603R1ZX', phone: '9111111111', email: 'chennai@utccafe.com', address: '45, Anna Salai, Chennai - 600002' });
     const f2 = await Franchise.create({ name: 'UTC Café — Bangalore Koramangala', location: 'Koramangala, Bangalore', city: 'Bangalore', state: 'Karnataka', gstin: '29AABCU9603R1ZY', phone: '9222222222', email: 'bangalore@utccafe.com', address: '12, 5th Block, Koramangala, Bangalore - 560034' });
 
-    const o1 = await User.create({ name: 'Raj Kumar', email: 'raj@utccafe.com', password: 'Owner@1234', role: 'franchise_owner', franchise_id: f1._id, phone: '9111111112' });
-    const o2 = await User.create({ name: 'Priya Sharma', email: 'priya@utccafe.com', password: 'Owner@1234', role: 'franchise_owner', franchise_id: f2._id, phone: '9222222223' });
+    const o1 = await User.create({ name: 'Raj Kumar', email: 'raj@utccafe.com', password: demoPassword, role: 'franchise_owner', franchise_id: f1._id, phone: '9111111112' });
+    const o2 = await User.create({ name: 'Priya Sharma', email: 'priya@utccafe.com', password: demoPassword, role: 'franchise_owner', franchise_id: f2._id, phone: '9222222223' });
 
     await Franchise.findByIdAndUpdate(f1._id, { owner_id: o1._id });
     await Franchise.findByIdAndUpdate(f2._id, { owner_id: o2._id });

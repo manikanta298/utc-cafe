@@ -27,10 +27,8 @@ const setRefreshTokenCookie = (res, refreshToken) => {
   if (isProduction) cookieParts.push('Secure');
 
   res.setHeader('Set-Cookie', cookieParts.join('; '));
-  // Also expose in header for cross-origin cookie fallback (Vercel + Render)
-  res.setHeader('X-Refresh-Token', refreshToken);
-  // ── SECURITY: Do NOT expose raw JWT in custom headers in production
-  // The above is intentional for cross-origin fallback only
+  // SECURITY: refresh token lives ONLY in the HttpOnly cookie now.
+  // It is never returned in a response header or JSON body — see audit fix.
 };
 
 const clearRefreshTokenCookie = (res) => {

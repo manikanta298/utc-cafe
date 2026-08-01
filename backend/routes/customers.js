@@ -8,7 +8,10 @@ const { enforceActiveFranchise } = require('../middleware/franchiseGuard');
 router1.get('/lookup', protect, enforceActiveFranchise, lookupByPhone);
 
 // GET /api/customers/export.csv — master_admin only, optional ?franchiseId= filter
+// SECURITY/PERF: streamed via a Mongo cursor instead of loading up to 10k
+// documents (and the full CSV string) into memory at once.
 router1.get('/export.csv', protect, authorise('master_admin'), async (req, res) => {
+  const EXPORT_CAP = 10000;
   try {
     const Customer = require('../models/Customer');
     const { franchiseId } = req.query;
@@ -16,40 +19,52 @@ router1.get('/export.csv', protect, authorise('master_admin'), async (req, res) 
     const filter = {};
     if (franchiseId) filter.first_franchise = franchiseId;
 
-    const customers = await Customer.find(filter)
-      .populate('first_franchise', 'name franchiseCode')
-      .sort({ createdAt: -1 })
-      .limit(10000)
-      .lean();
-
     const csvEscape = (v) => `"${String(v ?? '').replace(/"/g, '""')}"`;
-
     const headers = ['Name', 'Phone', 'Email', 'Gender', 'Age', 'City', 'State',
       'Pincode', 'Total Orders', 'Total Spent', 'Total Points', 'First Franchise', 'Joined On'];
 
-    const rows = customers.map((c) => [
-      c.name,
-      c.phone_no,
-      c.email || '',
-      c.gender || '',
-      c.age ?? '',
-      c.city || '',
-      c.state || '',
-      c.pincode || '',
-      c.total_orders || 0,
-      Number(c.total_spent || 0).toFixed(2),
-      c.total_points || 0,
-      c.first_franchise ? `${c.first_franchise.name} (${c.first_franchise.franchiseCode})` : '',
-      c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : '',
-    ].map(csvEscape).join(','));
-
-    const csv = [headers.map(csvEscape).join(','), ...rows].join('\n');
-
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     res.setHeader('Content-Disposition', 'attachment; filename="customers.csv"');
-    res.send(csv);
+    res.write(headers.map(csvEscape).join(',') + '\n');
+
+    const cursor = Customer.find(filter)
+      .populate('first_franchise', 'name franchiseCode')
+      .sort({ createdAt: -1 })
+      .limit(EXPORT_CAP)
+      .lean()
+      .cursor();
+
+    let count = 0;
+    for await (const c of cursor) {
+      count += 1;
+      const row = [
+        c.name,
+        c.phone_no,
+        c.email || '',
+        c.gender || '',
+        c.age ?? '',
+        c.city || '',
+        c.state || '',
+        c.pincode || '',
+        c.total_orders || 0,
+        Number(c.total_spent || 0).toFixed(2),
+        c.total_points || 0,
+        c.first_franchise ? `${c.first_franchise.name} (${c.first_franchise.franchiseCode})` : '',
+        c.createdAt ? new Date(c.createdAt).toLocaleDateString('en-IN') : '',
+      ].map(csvEscape).join(',');
+      res.write(row + '\n');
+    }
+
+    if (count === EXPORT_CAP) {
+      res.write(`# Note: export capped at ${EXPORT_CAP} rows — narrow your filters (e.g. by franchise) for a complete export\n`);
+    }
+    res.end();
   } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
+    if (!res.headersSent) {
+      res.status(500).json({ success: false, message: err.message });
+    } else {
+      res.end();
+    }
   }
 });
 

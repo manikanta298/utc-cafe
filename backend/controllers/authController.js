@@ -60,7 +60,6 @@ const login = async (req, res) => {
     res.json({
       success: true,
       token,
-      refreshToken,
       user: user.toJSON(),
     });
   } catch (err) {
@@ -91,7 +90,7 @@ const refresh = async (req, res) => {
     const refreshToken = signRefreshToken(user._id);
     setRefreshTokenCookie(res, refreshToken);
 
-    res.json({ success: true, token, refreshToken, user: user.toJSON() });
+    res.json({ success: true, token, user: user.toJSON() });
   } catch (err) {
     console.error('[refresh]', err.message);
     res.status(500).json({ success: false, message: err.message });
