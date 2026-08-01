@@ -89,12 +89,7 @@ const getPaymentReport = async (req, res) => {
   try {
     const { franchiseId, startDate, endDate, format = 'json', paymentMethod = 'all' } = req.query;
     const filter = {};
-    const isExport = ['csv', 'excel', 'pdf'].includes(format);
     const isMaster = req.user.role === 'master_admin';
-
-    if (isExport && !isMaster) {
-      return res.status(403).json({ success: false, message: 'Only Master Admin can download financial reports' });
-    }
 
     if (!isMaster) {
       filter.franchiseId = req.user.franchise_id?._id || req.user.franchise_id;
