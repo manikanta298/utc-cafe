@@ -921,14 +921,31 @@ async function removeSessionItem(req, res) {
       return res.status(403).json({ success: false, message: 'Access denied' });
     }
 
-    // Editing a paid/closed/cancelled or already-billed session would make the invoice
-    // and financial history inconsistent. Use the refund/correction workflow instead.
-    if (['paid', 'closed', 'cancelled', 'bill_pending'].includes(session.status)) {
+    // Paid/closed/cancelled sessions are never editable.
+    // An unpaid bill_pending session is still editable: generating a bill does not
+    // create the final invoice in this system; the invoice is created only after payment.
+    // The previous implementation rejected every bill_pending session, causing the
+    // observed HTTP 400 when an operator tried to delete an item after generating a bill.
+    if (['paid', 'closed', 'cancelled'].includes(session.status)) {
       return res.status(400).json({
         success: false,
+        code: 'ORDER_NOT_EDITABLE',
         message: 'This order can no longer be edited. Use the refund/correction workflow.',
       });
     }
+
+    const hasPayment = Number(session.paidAmount || 0) > 0 ||
+      ['partially_paid', 'advance_paid', 'fully_paid'].includes(session.paymentStatus);
+
+    if (hasPayment || session.invoiceId) {
+      return res.status(400).json({
+        success: false,
+        code: 'ORDER_PAYMENT_FINALIZED',
+        message: 'Payment has already been recorded for this order. Use the refund/correction workflow.',
+      });
+    }
+
+    const wasBillPending = session.status === 'bill_pending';
 
     const franchise = await Franchise.findById(sessFranchise);
     if (!franchise?.edit_pin) {
@@ -1010,6 +1027,16 @@ async function removeSessionItem(req, res) {
     session.cgst_amount = tax.cgst;
     session.sgst_amount = tax.sgst;
     session.total_tax = tax.totalTax;
+
+    // A previously generated but unpaid bill is now invalid because its item snapshot
+    // changed. Re-open the session so the operator can continue editing and regenerate it.
+    if (wasBillPending) {
+      session.status = 'open';
+      session.billGeneratedAt = null;
+      session.discountAmount = 0;
+      session.couponCode = '';
+    }
+
     session.totalAmount = +(tax.grossTotal - Number(session.discountAmount || 0)).toFixed(2);
     session.mergedItems = session.subOrders.flatMap((sub) => sub.items.map((item) => ({
       menuItemId: item.menuItemId,
@@ -1023,6 +1050,18 @@ async function removeSessionItem(req, res) {
     })));
 
     await session.save();
+
+    // Restore the table to OCCUPIED when an unpaid bill_pending session is edited.
+    if (wasBillPending && session.tableId) {
+      try {
+        await Table.findByIdAndUpdate(session.tableId, {
+          status: 'occupied',
+          currentSessionId: session._id,
+        });
+      } catch (tableErr) {
+        console.warn('[removeSessionItem] table status restore failed:', tableErr.message);
+      }
+    }
 
     // Synchronize the linked Order document, whose embedded item IDs differ from session item IDs.
     if (linkedOrder && linkedOrderItemIndex >= 0) {
@@ -1045,6 +1084,8 @@ async function removeSessionItem(req, res) {
 
       if (linkedOrder.items.length === 0) {
         linkedOrder.kitchen_status = 'Cancelled';
+      } else if (wasBillPending && linkedOrder.kitchen_status === 'Completed') {
+        linkedOrder.kitchen_status = 'Pending';
       }
       await linkedOrder.save();
     }
@@ -1078,15 +1119,29 @@ async function removeSessionItem(req, res) {
         itemId,
         itemName,
         orderId: linkedOrder?._id || foundSubOrder.order_id || null,
+        billInvalidated: wasBillPending,
       });
+
+      if (wasBillPending && session.tableId) {
+        io.to(`franchise:${sessFranchise}`).emit('table:statusUpdated', {
+          tableId: session.tableId.toString(),
+          tableNumber: session.tableNumber,
+          status: 'occupied',
+          tokenNumber: session.tokenNumber,
+          sessionCleared: false,
+        });
+      }
     }
 
     const updated = await OrderSession.findById(session._id);
     return res.json({
       success: true,
-      message: `${itemName} removed`,
+      message: wasBillPending
+        ? `${itemName} removed. The unpaid bill was invalidated and the order is editable again.`
+        : `${itemName} removed`,
       session: updated,
       order: linkedOrder,
+      billInvalidated: wasBillPending,
     });
   } catch (err) {
     console.error('[removeSessionItem]', err);

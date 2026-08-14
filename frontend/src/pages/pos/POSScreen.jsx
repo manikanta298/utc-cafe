@@ -820,8 +820,15 @@ export default function POSScreen() {
         pin,
         reason: 'Manual void by POS operator',
       });
-      toast.success(`${pendingDeleteItem.name} removed`);
+      toast.success(r.data.message || `${pendingDeleteItem.name} removed`);
       setActiveSession(r.data.session);
+      // A delete from an unpaid bill_pending session invalidates the old bill snapshot.
+      if (r.data.billInvalidated) {
+        setRunningInvoice(null);
+        setInvoice(null);
+        setReceivedAmt('');
+        setPaymentMode('Cash');
+      }
     } catch(e) {
       toast.error(e.response?.data?.message || 'Delete failed');
     } finally {
