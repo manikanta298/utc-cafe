@@ -72,8 +72,13 @@ const deleteCoupon = async (req, res) => {
 // POST /api/coupons/validate — Check coupon and return discount
 const validateCoupon = async (req, res) => {
   try {
-    const { code, orderAmount } = req.body;
-    const coupon = await Coupon.findOne({ code: code.toUpperCase(), isActive: true });
+    const { code, orderAmount, franchiseId } = req.body;
+    if (!code || !String(code).trim()) {
+      return res.status(400).json({ success: false, message: 'Coupon code is required' });
+    }
+
+    const normalizedCode = String(code).trim().toUpperCase();
+    const coupon = await Coupon.findOne({ code: normalizedCode, isActive: true });
     if (!coupon) return res.status(404).json({ success: false, message: 'Invalid or expired coupon code' });
 
     const now = new Date();
@@ -82,6 +87,12 @@ const validateCoupon = async (req, res) => {
     }
     if (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) {
       return res.status(400).json({ success: false, message: 'Coupon usage limit reached' });
+    }
+
+    if (coupon.applicableFranchises?.length > 0) {
+      if (!franchiseId || !coupon.applicableFranchises.some(id => String(id) === String(franchiseId))) {
+        return res.status(400).json({ success: false, message: 'Coupon is not valid for this franchise' });
+      }
     }
     if (coupon.minOrderAmount > 0 && orderAmount < coupon.minOrderAmount) {
       return res.status(400).json({

@@ -82,7 +82,7 @@ function TablePickerModal({ onClose, onSelect }) {
         </div>
         {next && !loading && (
           <div onClick={()=>onSelect(next)} className="mx-4 mt-3 flex items-center justify-between px-4 py-2 rounded-xl bg-green-500/10 border border-green-500/30 cursor-pointer hover:bg-green-500/20 transition-colors">
-            <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"/><span className="text-xs text-green-300 font-semibold">Suggested: Table {next.tableNumber}</span><span className="text-xs text-gray-500">({next.capacity} seats)</span></div>
+            <div className="flex items-center gap-2"><span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"/><span className="text-xs text-green-300 font-semibold">Suggested: Table {next.tableNumber}</span><span className="text-[10px] text-gray-500">({next.capacity} seats)</span></div>
             <span className="text-[10px] text-green-500 font-bold uppercase tracking-wide">Tap →</span>
           </div>
         )}
@@ -105,7 +105,7 @@ function TablePickerModal({ onClose, onSelect }) {
           )}
         </div>
         <div className="flex items-center justify-between gap-3 px-5 py-4 border-t border-[#2e2e2e]">
-          <div className="text-xs text-gray-500">Select an available table to begin a dine-in order</div>
+          <div className="text-[10px] text-gray-500">Select an available table to begin a dine-in order</div>
           <button onClick={onClose} className="px-5 py-2 rounded-xl bg-[#2a2a2a] text-gray-300 text-sm font-semibold hover:bg-[#353535] transition-colors">Close</button>
         </div>
       </div>
@@ -532,9 +532,11 @@ export default function POSScreen() {
     if (!couponInput.trim()) return;
     setCouponLoading(true);
     try {
+      const orderAmount = Math.max(0, +(billSubtotal + billGST).toFixed(2));
       const r = await api.post('/coupons/validate', {
         code: couponInput.trim(),
-        orderAmount: subtotal + gst,
+        orderAmount,
+        franchiseId,
       });
       setAppliedCoupon({ code: r.data.coupon.code, discountAmount: r.data.discountAmount });
       setDiscount(r.data.discountAmount);
@@ -613,14 +615,25 @@ export default function POSScreen() {
         reference: paymentRef.trim(),
       });
 
+      const paidSession = payRes.data.session || activeSession;
       setInvoice(payRes.data.invoice || invoice || runningInvoice || null);
-      setActiveSession(payRes.data.session || activeSession);
+      setActiveSession(paidSession);
       setRunningInvoice(payRes.data.invoice || runningInvoice || null);
       setReceivedAmt('');
       setPaymentRef('');
       loadStats();
       loadTables();
-      toast.success('Payment recorded');
+
+      // After a fully paid order, always return to the table map so the
+      // operator can immediately select the next table. Partial payments
+      // remain on the invoice screen.
+      if (paidSession?.paymentStatus === 'fully_paid' || paidSession?.status === 'paid') {
+        toast.success('Payment recorded');
+        resetFlow();
+        setScreen('dashboard');
+      } else {
+        toast.success('Payment recorded');
+      }
     } catch (e) {
       toast.error(e.response?.data?.message || 'Payment failed');
     } finally {
@@ -637,7 +650,8 @@ export default function POSScreen() {
         html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
         body * { visibility: hidden !important; }
         #pos-thermal-receipt, #pos-thermal-receipt * { visibility: visible !important; }
-        #pos-thermal-receipt { position: absolute; left: 0; top: 0; width: 80mm; }
+        #pos-thermal-receipt { position: absolute; left: 0; top: 0; width: 80mm; padding: 2mm 1.5mm !important; font-size: 9px !important; line-height: 1.15 !important; }
+        #pos-thermal-receipt .print-spacer { display: none !important; }
       }
     `;
     document.head.appendChild(style);
@@ -1167,7 +1181,7 @@ export default function POSScreen() {
         <span className="text-[11px] bg-red-500/25 text-red-400 border border-red-500/40 px-2 py-0.5 rounded font-bold">
           {isActive ? 'OCCUPIED' : 'NEW ORDER'}
         </span>
-        <span className="text-xs text-gray-500">{seats} Seats</span>
+        <span className="text-[10px] text-gray-500">{seats} Seats</span>
         {activeSession?.tokenNumber && (
           <span className="ml-auto text-[11px] bg-orange-500/20 text-orange-400 border border-orange-500/40 px-3 py-0.5 rounded-full font-bold">
             #TOKEN-{activeSession.tokenNumber}
@@ -1750,7 +1764,7 @@ export default function POSScreen() {
           </div>
         )}
         {!parcelCustomer && parcelPhone.length > 0 && parcelPhone.length < 10 && (
-          <p className="text-xs text-gray-500">Enter 10 digits to look up customer</p>
+          <p className="text-[10px] text-gray-500">Enter 10 digits to look up customer</p>
         )}
         {!parcelCustomer && parcelPhone.length === 10 && (
           <div className="rounded-xl bg-[#1e1e1e] border border-[#2a2a2a] p-3 space-y-2">
@@ -2007,17 +2021,17 @@ export default function POSScreen() {
   // ── 8. INVOICE / RECEIPT ─────────────────────────────────────
 
   const ScreenInvoice = (
-    <div className="h-full overflow-y-auto p-5">
-      <div className="max-w-6xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div className="lg:col-span-2 bg-white rounded-2xl shadow-xl border border-gray-200 overflow-hidden">
-          <div id="pos-thermal-receipt" className="p-5 text-gray-900" style={{ fontFamily: '"Courier New", Courier, monospace', color: '#111' }}>
-            <div className="text-center mb-4">
-              <div className="text-2xl font-black tracking-wide">{franchiseInfo?.name || 'Utc Cafe'}</div>
-              <div className="text-xs text-gray-500 mt-1">{franchiseInfo?.address || '1-2-3, Main Road, Vijayawada, Andhra Pradesh - 520001'}</div>
-              <div className="text-xs text-gray-500">GSTIN: {franchiseInfo?.gstin || '37ABCDE1234F1Z5'}</div>
+    <div className="h-full overflow-y-auto p-3">
+      <div className="max-w-5xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="lg:col-span-2 bg-white rounded-xl shadow-lg border border-gray-200 overflow-hidden">
+          <div id="pos-thermal-receipt" className="p-3 text-gray-900" style={{ fontFamily: '"Courier New", Courier, monospace', color: '#111', fontSize: '11px', lineHeight: 1.25 }}>
+            <div className="text-center mb-2">
+              <div className="text-lg font-black tracking-wide">{franchiseInfo?.name || 'Utc Cafe'}</div>
+              <div className="text-[10px] text-gray-500 mt-0.5">{franchiseInfo?.address || '1-2-3, Main Road, Vijayawada, Andhra Pradesh - 520001'}</div>
+              <div className="text-[10px] text-gray-500">GSTIN: {franchiseInfo?.gstin || '37ABCDE1234F1Z5'}</div>
             </div>
 
-            <div className="border-t border-b border-dashed border-gray-300 py-3 grid grid-cols-2 gap-4 text-xs">
+            <div className="border-t border-b border-dashed border-gray-300 py-2 grid grid-cols-2 gap-2 text-[10px]">
               <div className="space-y-0.5">
                 <div><span className="text-gray-500">Date</span> <span className="font-bold">{format(new Date(invoice?.invoice_date || invoice?.createdAt || new Date()), 'd MMM yyyy hh:mm a')}</span></div>
                 <div><span className="text-gray-500">Invoice No</span> <span className="font-bold">{invoice?.invoice_no || invoice?.invoiceNumber || runningInvoice?.invoice_no || runningInvoice?.invoiceNumber || 'INV0001'}</span></div>
@@ -2096,7 +2110,7 @@ export default function POSScreen() {
                 return (
                   <>
                     {rows.length === 0 ? (
-                      <div className="text-xs text-gray-500">No payment recorded yet. Use the panel on the right to add Cash, UPI, Card, or Split entries.</div>
+                      <div className="text-[10px] text-gray-500">No payment recorded yet. Use the panel on the right to add Cash, UPI, Card, or Split entries.</div>
                     ) : rows.map((row, idx) => (
                       <div key={idx} className="space-y-0.5 text-sm">
                         <div className="flex justify-between">
@@ -2525,11 +2539,19 @@ export default function POSScreen() {
               const updated = r.data.session || r.data;
               setActiveSession(updated);
               setInvoice(updated.invoice || invoice);
-            }).catch(()=>{});
-            setReceivedAmt('');
-            loadStats();
-            loadTables();
-            toast.success('Payment recorded');
+              setReceivedAmt('');
+              loadStats();
+              loadTables();
+              toast.success('Payment recorded');
+              if (updated?.paymentStatus === 'fully_paid' || updated?.status === 'paid') {
+                resetFlow();
+                setScreen('dashboard');
+              }
+            }).catch(()=>{
+              toast.success('Payment recorded');
+              resetFlow();
+              setScreen('dashboard');
+            });
           }}
         />
       )}
@@ -2543,12 +2565,17 @@ export default function POSScreen() {
           onClose={()=>setShowSplitModal(false)}
           onSuccess={({ invoice: newInvoice, session: newSession })=>{
             setShowSplitModal(false);
+            const paidSession = newSession || activeSession;
             setInvoice(newInvoice || invoice);
-            setActiveSession(newSession || activeSession);
+            setActiveSession(paidSession);
             setReceivedAmt('');
             loadStats();
             loadTables();
             toast.success('Payment recorded');
+            if (paidSession?.paymentStatus === 'fully_paid' || paidSession?.status === 'paid') {
+              resetFlow();
+              setScreen('dashboard');
+            }
           }}
         />
       )}

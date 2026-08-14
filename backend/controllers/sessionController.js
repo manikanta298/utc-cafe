@@ -358,14 +358,16 @@ const generateBill = async (req, res) => {
 
     if (couponCode) {
       const Coupon = require('../models/Coupon');
-      const coupon = await Coupon.findOne({ code: couponCode.toUpperCase(), isActive: true });
+      const coupon = await Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), isActive: true });
       if (coupon) {
         const now = new Date();
         const notExpired = !coupon.expiresAt || coupon.expiresAt > now;
         const hasUses = coupon.maxUses === 0 || coupon.usedCount < coupon.maxUses;
         const meetsMin = taxCalc.grossTotal >= coupon.minOrderAmount;
+        const _sessionFid = session.franchiseId?._id || session.franchiseId;
+        const franchiseAllowed = coupon.applicableFranchises?.length === 0 || coupon.applicableFranchises.some(id => String(id) === String(_sessionFid));
 
-        if (notExpired && hasUses && meetsMin) {
+        if (notExpired && hasUses && meetsMin && franchiseAllowed) {
           if (coupon.discountType === 'percentage') {
             discountAmount = +(taxCalc.grossTotal * coupon.discountValue / 100).toFixed(2);
             if (coupon.maxDiscountAmount > 0) discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount);

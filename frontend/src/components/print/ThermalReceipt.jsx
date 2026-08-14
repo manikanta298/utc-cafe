@@ -26,11 +26,11 @@ function buildPrintCSS(widthMm, fontSize) {
         left: 0;
         width: ${widthMm}mm;
         max-width: ${widthMm}mm;
-        padding: 3mm 2mm;
+        padding: 1.5mm 1.2mm;
         box-sizing: border-box;
         font-family: "Courier New", Courier, monospace;
         font-size: ${fontSize};
-        line-height: 1.3;
+        line-height: 1.15;
         color: #000 !important;
         background: #fff !important;
         -webkit-print-color-adjust: exact;
@@ -180,8 +180,8 @@ export default function ThermalReceipt({
 
   const cols = width <= 58 ? 32 : width <= 80 ? 42 : 56;
   const px = Math.round((width / 25.4) * 96);
-  const fs = width <= 58 ? '9px' : '10px';
-  const qrSize = width <= 58 ? 72 : 90;
+  const fs = width <= 58 ? '8px' : '9px';
+  const qrSize = width <= 58 ? 64 : 78;
   const divider = '─'.repeat(cols);
 
   function triggerPrint() {
@@ -247,14 +247,14 @@ export default function ThermalReceipt({
         background: '#fff',
         width: `${px}px`,
         maxWidth: `${px}px`,
-        padding: '6px 4px',
+        padding: '2px 2px',
         margin: '0 auto',
         boxSizing: 'border-box',
         overflowX: 'hidden',
         wordBreak: 'break-word',
       }}
     >
-      <div className="receipt-section" style={{ textAlign: 'center', marginBottom: '4px' }}>
+      <div className="receipt-section" style={{ textAlign: 'center', marginBottom: '2px' }}>
         <div style={{ fontWeight: 700, fontSize: width <= 58 ? '12px' : '14px', whiteSpace: 'nowrap' }}>
           {franchise?.name || 'UTC CAFE'}
         </div>
@@ -325,7 +325,7 @@ export default function ThermalReceipt({
 
       <div className="receipt-section" style={{ marginTop: '2px' }}>
         <div style={{ textAlign: 'center', fontWeight: 700, marginBottom: '2px' }}>PAYMENT BREAKDOWN</div>
-        <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', marginBottom: '4px' }}>{divider}</div>
+        <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', marginBottom: '2px' }}>{divider}</div>
 
         {paymentLines.map((p, index) => {
           const label = paymentLabel(p.method);
@@ -361,7 +361,7 @@ export default function ThermalReceipt({
 
       {hasUpi && (
         <>
-          <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', margin: '4px 0' }}>{divider}</div>
+          <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', margin: '2px 0' }}>{divider}</div>
           <div className="receipt-section" style={{ textAlign: 'center', padding: '2px 0' }}>
             <div style={{ fontWeight: 700, fontSize: '9px', marginBottom: '2px' }}>
               SCAN TO PAY (UPI)
@@ -381,7 +381,7 @@ export default function ThermalReceipt({
               <div style={{ fontSize: '8px', color: 'red' }}>QR EXPIRED — Ask staff to reprint</div>
             )}
           </div>
-          <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', margin: '4px 0' }}>{divider}</div>
+          <div style={{ overflow: 'hidden', whiteSpace: 'nowrap', margin: '2px 0' }}>{divider}</div>
         </>
       )}
 
