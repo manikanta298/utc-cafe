@@ -1176,7 +1176,8 @@ export default function POSScreen() {
     const itemsTotal = prevTotal + cartTotal;
     const gstAmount = (activeSession?.cgst_amount || 0) + (activeSession?.sgst_amount || 0);
     const gstRate = activeSession?.subOrders?.[0]?.items?.[0]?.gst_rate || 0;
-    const change = Math.max(0, parseFloat(receivedAmt || 0) - itemsTotal);
+    const grandTotal = Math.max(0, +(itemsTotal + gstAmount - discount).toFixed(2));
+    const change = Math.max(0, parseFloat(receivedAmt || 0) - grandTotal);
     const custName = activeSession?.customerName || customer?.name || newCustName || 'Walk-in';
     const custMobile = activeSession?.customerMobile || phone || '—';
     const tableNum   = selectedTable?.tableNumber || activeSession?.tableNumber || '—';
@@ -1408,9 +1409,37 @@ export default function POSScreen() {
                   <div className="flex justify-between text-xs text-gray-400">
                     <span>GST ({gstRate}%)</span><span className="text-white">{fmt(gstAmount)}</span>
                   </div>
+                  {discount > 0 && (
+                    <div className="flex justify-between text-xs text-gray-400">
+                      <span>Discount</span><span className="text-red-400">-{fmt(discount)}</span>
+                    </div>
+                  )}
+                  {/* Apply Coupon — available before Generate Bill */}
+                  <div className="pt-1">
+                    {appliedCoupon ? (
+                      <div className="flex items-center justify-between bg-green-500/10 border border-green-500/30 rounded-lg px-3 py-1.5">
+                        <span className="text-green-400 text-xs font-bold">🎟 {appliedCoupon.code} applied</span>
+                        <button onClick={removeCoupon} className="text-red-400 text-xs hover:text-red-300 ml-2">✕ Remove</button>
+                      </div>
+                    ) : (
+                      <div className="flex gap-1">
+                        <input
+                          className="flex-1 bg-[#252525] border border-[#333] rounded-l px-2 py-1 text-xs text-white outline-none placeholder-gray-600 uppercase"
+                          placeholder="COUPON CODE"
+                          value={couponInput}
+                          onChange={e=>setCouponInput(e.target.value.toUpperCase())}
+                          onKeyDown={e=>e.key==='Enter'&&applyCoupon()}
+                        />
+                        <button
+                          onClick={applyCoupon}
+                          disabled={couponLoading || !couponInput.trim()}
+                          className="bg-orange-500 hover:bg-orange-400 disabled:opacity-40 text-white text-xs px-3 py-1 rounded-r font-bold transition-colors">{couponLoading ? '...' : 'APPLY'}</button>
+                      </div>
+                    )}
+                  </div>
                   <div className="flex justify-between text-sm font-black pt-2 border-t border-[#1e1e1e] mt-1">
                     <span className="text-white">Total Amount</span>
-                    <span className="text-orange-400">{fmt(itemsTotal + gstAmount)}</span>
+                    <span className="text-orange-400">{fmt(grandTotal)}</span>
                   </div>
                 </div>
               </div>
