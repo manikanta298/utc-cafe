@@ -358,27 +358,38 @@ const generateBill = async (req, res) => {
 
     if (couponCode) {
       const Coupon = require('../models/Coupon');
-      const coupon = await Coupon.findOne({ code: String(couponCode).trim().toUpperCase(), isActive: true });
-      if (coupon) {
-        const now = new Date();
-        const notExpired = !coupon.expiresAt || coupon.expiresAt > now;
-        const hasUses = coupon.maxUses === 0 || coupon.usedCount < coupon.maxUses;
-        const meetsMin = taxCalc.grossTotal >= coupon.minOrderAmount;
-        const _sessionFid = session.franchiseId?._id || session.franchiseId;
-        const franchiseAllowed = coupon.applicableFranchises?.length === 0 || coupon.applicableFranchises.some(id => String(id) === String(_sessionFid));
-
-        if (notExpired && hasUses && meetsMin && franchiseAllowed) {
-          if (coupon.discountType === 'percentage') {
-            discountAmount = +(taxCalc.grossTotal * coupon.discountValue / 100).toFixed(2);
-            if (coupon.maxDiscountAmount > 0) discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount);
-          } else {
-            discountAmount = Math.min(coupon.discountValue, taxCalc.grossTotal);
-          }
-          appliedCoupon = coupon.code;
-          coupon.usedCount += 1;
-          await coupon.save();
-        }
+      const normalizedCouponCode = String(couponCode).trim().toUpperCase();
+      const coupon = await Coupon.findOne({ code: normalizedCouponCode, isActive: true });
+      if (!coupon) {
+        return res.status(400).json({ success: false, message: 'Invalid or expired coupon code' });
       }
+
+      const now = new Date();
+      if (coupon.expiresAt && coupon.expiresAt <= now) {
+        return res.status(400).json({ success: false, message: 'Coupon has expired' });
+      }
+      if (coupon.maxUses > 0 && coupon.usedCount >= coupon.maxUses) {
+        return res.status(400).json({ success: false, message: 'Coupon usage limit reached' });
+      }
+      if (coupon.minOrderAmount > 0 && taxCalc.grossTotal < coupon.minOrderAmount) {
+        return res.status(400).json({ success: false, message: `Minimum order amount Rs.${coupon.minOrderAmount} required` });
+      }
+
+      const _sessionFid = session.franchiseId?._id || session.franchiseId;
+      const franchiseAllowed = !coupon.applicableFranchises?.length || coupon.applicableFranchises.some(id => String(id) === String(_sessionFid));
+      if (!franchiseAllowed) {
+        return res.status(400).json({ success: false, message: 'Coupon is not valid for this franchise' });
+      }
+
+      if (coupon.discountType === 'percentage') {
+        discountAmount = +(taxCalc.grossTotal * coupon.discountValue / 100).toFixed(2);
+        if (coupon.maxDiscountAmount > 0) discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount);
+      } else {
+        discountAmount = Math.min(coupon.discountValue, taxCalc.grossTotal);
+      }
+      appliedCoupon = coupon.code;
+      // Do not consume the coupon merely because the bill was previewed/generated.
+      // Usage should be consumed only when the payment is successfully completed.
     }
 
     const totalAmount = Math.max(0, +(taxCalc.grossTotal - discountAmount).toFixed(2));

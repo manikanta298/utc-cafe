@@ -538,8 +538,9 @@ export default function POSScreen() {
         orderAmount,
         franchiseId,
       });
-      setAppliedCoupon({ code: r.data.coupon.code, discountAmount: r.data.discountAmount });
-      setDiscount(r.data.discountAmount);
+      const discountAmount = Number(r.data.discountAmount || 0);
+      setAppliedCoupon({ code: r.data.coupon.code, discountAmount });
+      setDiscount(discountAmount);
       toast.success(`Coupon applied! ₹${r.data.discountAmount} off`);
     } catch(e) {
       toast.error(e.response?.data?.message || 'Invalid coupon');
@@ -561,6 +562,8 @@ export default function POSScreen() {
     try {
       const r = await api.post(`/sessions/${activeSession._id}/bill`, {
         couponCode: appliedCoupon?.code || undefined,
+        // Send only the coupon code; the backend recalculates the authoritative
+        // discount from the session items and franchise rules.
       });
 
       const updatedSession = r.data.session || activeSession;
@@ -569,6 +572,17 @@ export default function POSScreen() {
       setRunningInvoice(r.data.invoice || r.data || null);
       setInvoice(r.data.invoice || null);
       setActiveSession(updatedSession);
+      // Keep the UI total synchronized with the server-authoritative coupon
+      // discount returned after bill generation.
+      setDiscount(Number(updatedSession.discountAmount || r.data.invoice?.discount_amount || 0));
+      if (updatedSession.couponCode) {
+        setAppliedCoupon(prev => ({
+          code: updatedSession.couponCode,
+          discountAmount: Number(updatedSession.discountAmount || 0),
+          ...(prev || {}),
+        }));
+        setCouponInput(updatedSession.couponCode);
+      }
       setScreen('invoice');
 
       // Keep the first payment method selected for the invoice screen.

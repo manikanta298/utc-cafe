@@ -72,10 +72,22 @@ const deleteCoupon = async (req, res) => {
 // POST /api/coupons/validate — Check coupon and return discount
 const validateCoupon = async (req, res) => {
   try {
-    const { code, orderAmount, franchiseId } = req.body;
+    const { code, orderAmount, franchiseId: requestedFranchiseId } = req.body;
     if (!code || !String(code).trim()) {
       return res.status(400).json({ success: false, message: 'Coupon code is required' });
     }
+
+    const parsedOrderAmount = Number(orderAmount);
+    if (!Number.isFinite(parsedOrderAmount) || parsedOrderAmount < 0) {
+      return res.status(400).json({ success: false, message: 'Valid order amount is required' });
+    }
+
+    // Never trust a client-supplied franchiseId for authorization. For normal
+    // POS users derive the franchise from their authenticated account.
+    const userFranchiseId = req.user?.franchise_id?._id || req.user?.franchise_id || null;
+    const effectiveFranchiseId = req.user?.role === 'master_admin'
+      ? requestedFranchiseId
+      : userFranchiseId;
 
     const normalizedCode = String(code).trim().toUpperCase();
     const coupon = await Coupon.findOne({ code: normalizedCode, isActive: true });
@@ -90,11 +102,11 @@ const validateCoupon = async (req, res) => {
     }
 
     if (coupon.applicableFranchises?.length > 0) {
-      if (!franchiseId || !coupon.applicableFranchises.some(id => String(id) === String(franchiseId))) {
+      if (!effectiveFranchiseId || !coupon.applicableFranchises.some(id => String(id) === String(effectiveFranchiseId))) {
         return res.status(400).json({ success: false, message: 'Coupon is not valid for this franchise' });
       }
     }
-    if (coupon.minOrderAmount > 0 && orderAmount < coupon.minOrderAmount) {
+    if (coupon.minOrderAmount > 0 && parsedOrderAmount < coupon.minOrderAmount) {
       return res.status(400).json({
         success: false,
         message: `Minimum order amount Rs.${coupon.minOrderAmount} required`,
@@ -103,10 +115,10 @@ const validateCoupon = async (req, res) => {
 
     let discountAmount = 0;
     if (coupon.discountType === 'percentage') {
-      discountAmount = +(orderAmount * coupon.discountValue / 100).toFixed(2);
+      discountAmount = +(parsedOrderAmount * coupon.discountValue / 100).toFixed(2);
       if (coupon.maxDiscountAmount > 0) discountAmount = Math.min(discountAmount, coupon.maxDiscountAmount);
     } else {
-      discountAmount = Math.min(coupon.discountValue, orderAmount);
+      discountAmount = Math.min(coupon.discountValue, parsedOrderAmount);
     }
 
     res.json({
@@ -118,7 +130,7 @@ const validateCoupon = async (req, res) => {
         description: coupon.description,
       },
       discountAmount,
-      finalAmount: +(orderAmount - discountAmount).toFixed(2),
+      finalAmount: +(parsedOrderAmount - discountAmount).toFixed(2),
     });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
