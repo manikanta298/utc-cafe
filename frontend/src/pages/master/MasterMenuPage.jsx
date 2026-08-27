@@ -3,7 +3,6 @@ import { Plus, Pencil, Trash2, Upload, Search, X, ToggleLeft, ToggleRight } from
 import api from '../../lib/api';
 import toast from 'react-hot-toast';
 
-const CATEGORIES = ['Beverages', 'Snacks', 'Meals', 'Desserts', 'Breads', 'Specials', 'Add-ons'];
 const GST_RATES = [0, 5, 12, 18, 28];
 
 const STATUS_TABS = [
@@ -12,12 +11,12 @@ const STATUS_TABS = [
   { key: 'inactive', label: '⛔ Inactive' },
 ];
 
-const ItemModal = ({ item, onClose, onSaved }) => {
+const ItemModal = ({ item, categories, onClose, onSaved }) => {
   const isEdit = !!item?._id;
   const [form, setForm] = useState({
     name: item?.name || '',
     description: item?.description || '',
-    category: item?.category || 'Beverages',
+    category: item?.category || '',
     price: item?.price || '',
     gst_rate: item?.gst_rate || 5,
     hsn_code: item?.hsn_code || '',
@@ -41,6 +40,10 @@ const ItemModal = ({ item, onClose, onSaved }) => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!form.category) {
+      toast.error('Please select a category');
+      return;
+    }
     setSaving(true);
     try {
       const fd = new FormData();
@@ -114,8 +117,22 @@ const ItemModal = ({ item, onClose, onSaved }) => {
             </div>
             <div>
               <label className="label">Category *</label>
-              <input className="input" list="cat-list" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required />
-              <datalist id="cat-list">{CATEGORIES.map((c) => <option key={c} value={c} />)}</datalist>
+              <select
+                className="input"
+                value={form.category}
+                onChange={(e) => setForm({ ...form, category: e.target.value })}
+                required
+              >
+                <option value="">Select category</option>
+                {categories.map((category) => (
+                  <option key={category._id} value={category.name}>
+                    {category.name}
+                  </option>
+                ))}
+              </select>
+              {categories.length === 0 && (
+                <p className="mt-1 text-xs text-amber-400">Create an active category before adding a menu item.</p>
+              )}
             </div>
             <div>
               <label className="label">Price (₹) *</label>
@@ -152,7 +169,7 @@ const ItemModal = ({ item, onClose, onSaved }) => {
           </div>
           <div className="flex gap-3 pt-2">
             <button type="button" onClick={onClose} className="btn-ghost flex-1">Cancel</button>
-            <button type="submit" disabled={saving} className="btn-primary flex-1">
+            <button type="submit" disabled={saving || categories.length === 0} className="btn-primary flex-1">
               {saving ? 'Saving...' : isEdit ? 'Save Changes' : 'Create Item'}
             </button>
           </div>
@@ -164,6 +181,7 @@ const ItemModal = ({ item, onClose, onSaved }) => {
 
 export default function MasterMenuPage() {
   const [items, setItems] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -173,6 +191,15 @@ export default function MasterMenuPage() {
   const [toggling, setToggling] = useState(null);
   const searchTimer = useRef(null);
 
+  const loadCategories = useCallback(async () => {
+    try {
+      const res = await api.get('/categories');
+      setCategories(res.data.categories || []);
+    } catch {
+      toast.error('Failed to load categories');
+    }
+  }, []);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -181,7 +208,11 @@ export default function MasterMenuPage() {
     } catch { toast.error('Failed to load menu'); }
     setLoading(false);
   }, []);
-  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    load();
+    loadCategories();
+  }, [load, loadCategories]);
 
   const handleSearchChange = (e) => {
     const val = e.target.value;
@@ -233,12 +264,13 @@ export default function MasterMenuPage() {
             {counts.active} active · {counts.inactive} inactive · {counts.all} total
           </p>
         </div>
-        <button onClick={() => setModal('new')} className="btn-primary flex items-center gap-2">
-          <Plus size={18} /> Add Item
-        </button>
+        <div className="flex gap-2">
+          <button onClick={() => setModal('new')} className="btn-primary flex items-center gap-2">
+            <Plus size={18} /> Add Item
+          </button>
+        </div>
       </div>
 
-      {/* Status filter tabs */}
       <div className="flex gap-2 flex-wrap mb-4">
         {STATUS_TABS.map(({ key, label }) => (
           <button
@@ -258,17 +290,25 @@ export default function MasterMenuPage() {
         ))}
       </div>
 
-      {/* Category + Search filters */}
       <div className="flex flex-wrap gap-3 mb-6">
         <div className="relative">
           <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
           <input className="input pl-9 w-56" placeholder="Search items..." value={search} onChange={handleSearchChange} />
         </div>
         <div className="flex gap-2 flex-wrap">
-          {['', ...CATEGORIES].map((c) => (
-            <button key={c} onClick={() => setCatFilter(c)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${catFilter === c ? 'bg-brand-500 text-white' : 'bg-dark-700 text-gray-500 hover:text-white'}`}>
-              {c || 'All'}
+          <button
+            onClick={() => setCatFilter('')}
+            className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${catFilter === '' ? 'bg-brand-500 text-white' : 'bg-dark-700 text-gray-500 hover:text-white'}`}
+          >
+            All
+          </button>
+          {categories.map((category) => (
+            <button
+              key={category._id}
+              onClick={() => setCatFilter(category.name)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-colors ${catFilter === category.name ? 'bg-brand-500 text-white' : 'bg-dark-700 text-gray-500 hover:text-white'}`}
+            >
+              {category.name}
             </button>
           ))}
         </div>
@@ -315,7 +355,6 @@ export default function MasterMenuPage() {
                   <span className="badge bg-dark-600 text-gray-500 border-0 text-[10px]">GST {item.gst_rate}%</span>
                 </div>
                 <div className="flex gap-2">
-                  {/* Quick toggle */}
                   <button
                     onClick={() => handleGlobalToggle(item)}
                     disabled={toggling === item._id}
@@ -345,8 +384,9 @@ export default function MasterMenuPage() {
       {modal && (
         <ItemModal
           item={modal === 'new' ? null : modal}
+          categories={categories}
           onClose={() => setModal(null)}
-          onSaved={() => { setModal(null); load(); }}
+          onSaved={() => { setModal(null); load(); loadCategories(); }}
         />
       )}
     </div>

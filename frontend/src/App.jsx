@@ -18,6 +18,7 @@ import ProtectedRoute from './components/auth/ProtectedRoute';
 const MasterDashboard      = lazy(() => import('./pages/master/MasterDashboard'));
 const FranchisesPage       = lazy(() => import('./pages/master/FranchisesPage'));
 const MasterMenuPage       = lazy(() => import('./pages/master/MasterMenuPage'));
+const CategoriesPage       = lazy(() => import('./pages/master/CategoriesPage'));
 const MasterStaffPage      = lazy(() => import('./pages/master/MasterStaffPage'));
 const MasterCustomersPage  = lazy(() => import('./pages/master/MasterCustomersPage'));
 const MasterInvoicesPage   = lazy(() => import('./pages/master/MasterInvoicesPage'));
@@ -110,6 +111,7 @@ export default function App() {
             <Route path="dashboard"       element={<MasterDashboard />} />
             <Route path="franchises"      element={<FranchisesPage />} />
             <Route path="menu"            element={<MasterMenuPage />} />
+            <Route path="categories"      element={<CategoriesPage />} />
             <Route path="customers"       element={<MasterCustomersPage />} />
             <Route path="invoices"        element={<MasterInvoicesPage />} />
             <Route path="coupons"         element={<CouponsPage />} />
