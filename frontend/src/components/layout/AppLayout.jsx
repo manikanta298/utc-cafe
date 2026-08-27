@@ -3,6 +3,7 @@ import {
   Coffee, LayoutDashboard, Store, UtensilsCrossed, Users, Receipt,
   FileText, ChefHat, LogOut, Menu, X, History, Lock, Tag,
   Shield, BarChart2, MapPin, IndianRupee, TrendingUp, Search, Package,
+  ListTree,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import useAuthStore from '../../store/authStore';
@@ -15,6 +16,7 @@ const MASTER_NAV = [
   { to: '/master/dashboard',       icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/master/franchises',      icon: Store,           label: 'Franchises' },
   { to: '/master/menu',            icon: UtensilsCrossed, label: 'Menu' },
+  { to: '/master/categories',      icon: ListTree,        label: 'Categories' },
   { to: '/master/customers',       icon: Users,           label: 'Customers' },
   { to: '/master/invoices',        icon: FileText,        label: 'Invoices & GST' },
   { to: '/master/coupons',         icon: Tag,             label: 'Coupons' },
@@ -35,7 +37,7 @@ const FRANCHISE_NAV = [
   { to: '/franchise/fast-moving',     icon: BarChart2,       label: 'Fast Moving Items' },
   { to: '/franchise/search',          icon: Search,          label: 'Search' },
   { to: '/franchise/inventory',       icon: Package,         label: 'Inventory' },
-  { to: '/inventory/raw-materials',     icon: Package,         label: 'Raw Materials' },
+  { to: '/inventory/raw-materials',   icon: Package,         label: 'Raw Materials' },
   { to: '/pos',                       icon: Receipt,         label: 'POS Billing', matchPaths: ['/pos', '/pos/history'] },
   { to: '/kitchen',                   icon: ChefHat,         label: 'Kitchen' },
 ];
@@ -91,11 +93,6 @@ export default function AppLayout() {
   const nav = useMemo(() => getNavForRole(normalizeRole(user?.role)), [user?.role]);
   const franchiseStatus = user?.franchise_id?.status || (user?.franchise_id?.isActive === false ? 'inactive' : 'active');
 
-  // Notification socket listeners now live in <NotificationProvider />,
-  // rendered below in the JSX. This component is included in BOTH AppLayout
-  // and BareLayout so POS/Waiter/Kitchen routes (which use BareLayout) also
-  // receive order:ready / order:new notifications.
-
   useEffect(() => {
     const handleResize = () => {
       const mobile = window.innerWidth < 1024;
@@ -106,7 +103,6 @@ export default function AppLayout() {
     return () => window.removeEventListener('resize', handleResize);
   }, []);
 
-  // Auto-close sidebar on mobile when navigating
   useEffect(() => {
     if (isMobile) setSidebarOpen(false);
   }, [location.pathname, isMobile]);
@@ -123,7 +119,6 @@ export default function AppLayout() {
   return (
     <div className="flex min-h-screen bg-dark-900">
       <NotificationProvider />
-      {/* Mobile overlay */}
       {isMobile && sidebarOpen && (
         <button
           type="button"
@@ -133,7 +128,6 @@ export default function AppLayout() {
         />
       )}
 
-      {/* Sidebar */}
       <aside
         className={[
           'fixed inset-y-0 left-0 z-40 flex w-64 flex-col border-r border-dark-600 bg-dark-800',
@@ -142,19 +136,13 @@ export default function AppLayout() {
           sidebarOpen ? 'translate-x-0' : '-translate-x-full',
         ].join(' ')}
       >
-        {/* Logo */}
         <div className="flex items-center justify-between gap-3 border-b border-dark-600 px-4 py-4">
           <div className="flex flex-1 items-center justify-center">
             <img
-                src="/logo.png"
-                alt="UTC Cafe"
-                style={{
-                  height: '80px',
-                  width: 'auto',
-                  objectFit: 'contain',
-                  display: 'block',
-                }}
-              />
+              src="/logo.png"
+              alt="UTC Cafe"
+              style={{ height: '80px', width: 'auto', objectFit: 'contain', display: 'block' }}
+            />
           </div>
           <button
             type="button"
@@ -166,7 +154,6 @@ export default function AppLayout() {
           </button>
         </div>
 
-        {/* Nav */}
         <nav className="flex-1 space-y-0.5 overflow-y-auto px-2 py-4">
           {nav.map(({ to, icon: Icon, label, matchPaths }) => {
             const isActive = matchPaths
@@ -190,7 +177,6 @@ export default function AppLayout() {
           })}
         </nav>
 
-        {/* User card + logout */}
         <div className="border-t border-dark-600 p-3">
           <div className="mb-2 rounded-xl bg-dark-700 p-3">
             <div className="truncate text-sm font-semibold text-white">{user?.name}</div>
@@ -211,9 +197,7 @@ export default function AppLayout() {
         </div>
       </aside>
 
-      {/* Main content */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {/* Top bar */}
         <header className="flex h-14 items-center gap-4 border-b border-dark-600 bg-dark-800 px-4 sm:px-6 flex-shrink-0">
           <button
             onClick={toggleSidebar}
@@ -223,26 +207,23 @@ export default function AppLayout() {
           >
             <Menu size={20} />
           </button>
-
           <div className="min-w-0 flex-1">
             <div className="truncate text-sm font-semibold text-white">
               {ROLE_LABELS[user?.role] || 'Workspace'}
             </div>
           </div>
-
           <div className="flex h-8 w-8 items-center justify-center rounded-full bg-brand-500/20 text-sm font-bold text-brand-400 flex-shrink-0">
             {user?.name?.[0]?.toUpperCase()}
           </div>
         </header>
 
         <main className="flex-1 overflow-auto p-4 sm:p-6">
-          {/* FIX: Franchise inactive warning banner */}
           {franchiseStatus !== 'active' && user?.role !== 'master_admin' && (
             <div className="mb-4 flex items-start gap-3 rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-3 text-sm text-red-400">
               <span className="text-lg">⚠️</span>
               <div>
                 <p className="font-bold">Franchise is {franchiseStatus} — all operations are blocked (403 errors)</p>
-                <p className="text-xs text-red-300 mt-0.5">Ask your <strong>master admin</strong> to log in → go to <strong>Franchises</strong> page → click <strong>"Activate"</strong> on this franchise.</p>
+                <p className="mt-0.5 text-xs text-red-300">Ask your <strong>master admin</strong> to log in → go to <strong>Franchises</strong> page → click <strong>"Activate"</strong> on this franchise.</p>
               </div>
             </div>
           )}
