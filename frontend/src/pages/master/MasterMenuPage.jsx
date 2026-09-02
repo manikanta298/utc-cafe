@@ -1,5 +1,5 @@
 import { useEffect, useState, useMemo, useCallback, useRef } from 'react';
-import { Plus, Pencil, Trash2, Upload, Search, X, ToggleLeft, ToggleRight, FileSpreadsheet, Download, FileJson, AlertTriangle } from 'lucide-react';
+import { Plus, Pencil, Trash2, Upload, Search, X, ToggleLeft, ToggleRight, FileSpreadsheet, Download, FileJson, AlertTriangle, Link as LinkIcon } from 'lucide-react';
 import api from '../../lib/api';
 import toast from 'react-hot-toast';
 
@@ -9,7 +9,7 @@ const STATUS_TABS = [
   { key: 'active', label: '✅ Active' },
   { key: 'inactive', label: '⛔ Inactive' },
 ];
-const BULK_COLUMNS = ['_id','operation','name','description','category','price','gst_rate','hsn_code','isVeg','preparationTime','isGlobalActive','sortOrder','stock_enabled','stock_qty','unit','low_stock_threshold'];
+const BULK_COLUMNS = ['_id','operation','name','description','category','price','gst_rate','hsn_code','isVeg','preparationTime','isGlobalActive','sortOrder','stock_enabled','stock_qty','unit','low_stock_threshold','image_url'];
 
 const loadXlsx = (() => {
   let promise;
@@ -34,6 +34,26 @@ const toBoolean = (value, fallback = false) => {
   return ['true', '1', 'yes', 'y'].includes(String(value).trim().toLowerCase());
 };
 
+const isHttpUrl = (value) => {
+  if (!value) return true;
+  try {
+    const url = new URL(String(value).trim());
+    return url.protocol === 'http:' || url.protocol === 'https:';
+  } catch {
+    return false;
+  }
+};
+
+const imageUrlToFile = async (imageUrl) => {
+  const response = await fetch(imageUrl, { mode: 'cors' });
+  if (!response.ok) throw new Error(`Image URL returned HTTP ${response.status}`);
+  const blob = await response.blob();
+  if (!blob.type.startsWith('image/')) throw new Error('Image URL did not return an image file');
+  const pathname = new URL(imageUrl).pathname;
+  const extension = pathname.split('.').pop()?.split('?')[0] || 'jpg';
+  return new File([blob], `menu-image-${Date.now()}.${extension}`, { type: blob.type });
+};
+
 const normaliseRow = (row) => ({
   ...row,
   operation: String(row.operation || 'UPDATE').trim().toUpperCase(),
@@ -52,6 +72,7 @@ const normaliseRow = (row) => ({
   stock_qty: row.stock_qty === '' || row.stock_qty === undefined ? 0 : Number(row.stock_qty),
   unit: row.unit === undefined || row.unit === '' ? 'pcs' : String(row.unit).trim(),
   low_stock_threshold: row.low_stock_threshold === '' || row.low_stock_threshold === undefined ? 10 : Number(row.low_stock_threshold),
+  image_url: row.image_url === undefined ? '' : String(row.image_url).trim(),
 });
 
 const validateRows = (rawRows) => {
@@ -64,6 +85,7 @@ const validateRows = (rawRows) => {
     if (row.operation !== 'DELETE' && !row.category) errors.push(`Row ${line}: category is required.`);
     if (row.operation !== 'DELETE' && (!Number.isFinite(row.price) || row.price < 0)) errors.push(`Row ${line}: price must be a non-negative number.`);
     if (row.operation !== 'DELETE' && !GST_RATES.includes(row.gst_rate)) errors.push(`Row ${line}: gst_rate must be one of ${GST_RATES.join(', ')}.`);
+    if (row.operation !== 'DELETE' && row.image_url && !isHttpUrl(row.image_url)) errors.push(`Row ${line}: image_url must be a valid HTTP/HTTPS URL.`);
     if (row.operation !== 'ADD' && !row._id) errors.push(`Row ${line}: _id is required for ${row.operation}.`);
     if (row.operation === 'ADD' && row._id) errors.push(`Row ${line}: remove _id for ADD; the server will create it.`);
     ['preparationTime', 'sortOrder', 'stock_qty', 'low_stock_threshold'].forEach((key) => {
@@ -101,6 +123,7 @@ const serialiseItem = (item) => ({
   stock_qty: item.stock_qty ?? 0,
   unit: item.unit || 'pcs',
   low_stock_threshold: item.low_stock_threshold ?? 10,
+  image_url: item.image?.url || '',
 });
 
 const exportJson = (items) => {
@@ -120,24 +143,28 @@ const ItemModal = ({ item, categories, onClose, onSaved }) => {
   const isEdit = !!item?._id;
   const [form, setForm] = useState({ name: item?.name || '', description: item?.description || '', category: item?.category || '', price: item?.price || '', gst_rate: item?.gst_rate ?? 5, hsn_code: item?.hsn_code || '', isVeg: item?.isVeg !== false, preparationTime: item?.preparationTime || 10, isGlobalActive: item?.isGlobalActive !== false, sortOrder: item?.sortOrder || 0, stock_enabled: item?.stock_enabled === true, stock_qty: item?.stock_qty || 0, unit: item?.unit || 'pcs', low_stock_threshold: item?.low_stock_threshold || 10 });
   const [imageFile, setImageFile] = useState(null);
+  const [imageUrl, setImageUrl] = useState(item?.image?.url || '');
   const [imagePreview, setImagePreview] = useState(item?.image?.url || '');
   const [removeImage, setRemoveImage] = useState(false);
   const [saving, setSaving] = useState(false);
-  const handleImage = (e) => { const file = e.target.files?.[0]; if (!file) return; setRemoveImage(false); setImageFile(file); setImagePreview(URL.createObjectURL(file)); };
+  const handleImage = (e) => { const file = e.target.files?.[0]; if (!file) return; setRemoveImage(false); setImageFile(file); setImageUrl(''); setImagePreview(URL.createObjectURL(file)); };
+  const handleImageUrl = (e) => { const value = e.target.value; setRemoveImage(false); setImageFile(null); setImageUrl(value); setImagePreview(value); };
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!form.category) return toast.error('Please select a category');
+    if (imageUrl && !isHttpUrl(imageUrl)) return toast.error('Please enter a valid HTTP/HTTPS image URL');
     setSaving(true);
     try {
       const fd = new FormData();
       Object.entries(form).forEach(([key, value]) => fd.append(key, value));
       if (imageFile) fd.append('image', imageFile);
+      else if (imageUrl && imageUrl !== item?.image?.url) fd.append('image', await imageUrlToFile(imageUrl));
       if (removeImage) fd.append('removeImage', 'true');
       if (isEdit) await api.put(`/menu/${item._id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       else await api.post('/menu', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
       toast.success(isEdit ? 'Item updated' : 'Item created');
       onSaved();
-    } catch (err) { toast.error(err.response?.data?.message || 'Error saving item'); }
+    } catch (err) { toast.error(err.response?.data?.message || err.message || 'Error saving item'); }
     finally { setSaving(false); }
   };
   return (
@@ -145,7 +172,7 @@ const ItemModal = ({ item, categories, onClose, onSaved }) => {
       <div className="card w-full max-w-2xl max-h-[92vh] overflow-y-auto animate-slide-up">
         <div className="flex items-center justify-between p-6 border-b border-dark-600"><h2 className="font-display text-xl font-bold text-white">{isEdit ? 'Edit Item' : 'Add Menu Item'}</h2><button onClick={onClose} className="text-gray-500 hover:text-white"><X size={20} /></button></div>
         <form onSubmit={handleSubmit} className="p-6 space-y-5">
-          <div><label className="label">Item Image (Cloudinary)</label><div className="flex gap-4 items-start"><div className="w-24 h-24 bg-dark-700 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0">{imagePreview ? <img src={imagePreview} alt="preview" className="w-full h-full object-cover" /> : <Upload size={24} className="text-gray-600" />}</div><div className="flex-1"><div className="flex flex-wrap gap-2"><label className="btn-ghost text-sm cursor-pointer inline-flex items-center gap-2"><Upload size={16} /> Choose Image<input type="file" accept="image/*" className="hidden" onChange={handleImage} /></label>{isEdit && imagePreview && <button type="button" onClick={() => { setImageFile(null); setImagePreview(''); setRemoveImage(true); }} className="btn-ghost text-sm inline-flex items-center gap-2 text-red-400"><Trash2 size={16} /> Remove Image</button>}</div><p className="text-xs text-gray-600 mt-1">JPG, PNG, WEBP — max 5MB</p></div></div></div>
+          <div><label className="label">Item Image (Cloudinary)</label><div className="flex gap-4 items-start"><div className="w-24 h-24 bg-dark-700 rounded-xl overflow-hidden flex items-center justify-center flex-shrink-0">{imagePreview ? <img src={imagePreview} alt="preview" className="w-full h-full object-cover" /> : <Upload size={24} className="text-gray-600" />}</div><div className="flex-1 space-y-2"><div className="flex flex-wrap gap-2"><label className="btn-ghost text-sm cursor-pointer inline-flex items-center gap-2"><Upload size={16} /> Upload File<input type="file" accept="image/*" className="hidden" onChange={handleImage} /></label>{isEdit && imagePreview && <button type="button" onClick={() => { setImageFile(null); setImageUrl(''); setImagePreview(''); setRemoveImage(true); }} className="btn-ghost text-sm inline-flex items-center gap-2 text-red-400"><Trash2 size={16} /> Remove Image</button>}</div><div className="flex items-center gap-2"><LinkIcon size={16} className="text-gray-500"/><input className="input" placeholder="Paste Cloudinary image URL" value={imageUrl} onChange={handleImageUrl} /></div><p className="text-xs text-gray-600">Upload a JPG/PNG/WEBP file or paste an HTTP/HTTPS image URL. URL images are sent through the existing backend Cloudinary upload flow.</p></div></div></div>
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2"><label className="label">Item Name *</label><input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
             <div className="col-span-2"><label className="label">Description</label><textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
@@ -200,6 +227,9 @@ const BulkMenuModal = ({ items, onClose, onComplete }) => {
           if (row.operation === 'DELETE') { await api.delete(`/menu/${row._id}`); results.deleted += 1; continue; }
           const fd = new FormData();
           ['name','description','category','price','gst_rate','hsn_code','isVeg','preparationTime','isGlobalActive','sortOrder','stock_enabled','stock_qty','unit','low_stock_threshold'].forEach((key) => fd.append(key, row[key]));
+          const existing = row._id ? items.find((item) => String(item._id) === String(row._id)) : null;
+          const existingImageUrl = existing?.image?.url || '';
+          if (row.image_url && row.image_url !== existingImageUrl) fd.append('image', await imageUrlToFile(row.image_url));
           if (row.operation === 'ADD') { await api.post('/menu', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); results.added += 1; }
           else { await api.put(`/menu/${row._id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); results.updated += 1; }
         } catch (err) { results.failed.push(`Row ${index + 2}: ${err.response?.data?.message || err.message || 'request failed'}`); }
@@ -215,9 +245,9 @@ const BulkMenuModal = ({ items, onClose, onComplete }) => {
       <div className="card w-full max-w-5xl max-h-[92vh] overflow-hidden flex flex-col">
         <div className="flex items-center justify-between p-5 border-b border-dark-600"><div><h2 className="font-display text-xl font-bold text-white">Bulk Menu Import</h2><p className="text-xs text-gray-500 mt-1">Excel (.xlsx/.xls) or JSON · use operation ADD, UPDATE, or DELETE</p></div><button onClick={onClose} className="text-gray-500 hover:text-white"><X size={20} /></button></div>
         <div className="p-5 space-y-4 overflow-y-auto">
-          <div className="rounded-xl border border-dark-500 bg-dark-800/60 p-4 text-sm text-gray-400"><p className="font-semibold text-gray-200 mb-2">Import rules</p><ul className="list-disc pl-5 space-y-1"><li>UPDATE and DELETE require the existing <code>_id</code>.</li><li>ADD must leave <code>_id</code> blank. Images are preserved on updates and can still be managed manually.</li><li>Rows are validated before any request is sent.</li><li>Existing backend authorization remains in force: only Master Admin can create, update, or delete.</li></ul></div>
+          <div className="rounded-xl border border-dark-500 bg-dark-800/60 p-4 text-sm text-gray-400"><p className="font-semibold text-gray-200 mb-2">Import rules</p><ul className="list-disc pl-5 space-y-1"><li>UPDATE and DELETE require the existing <code>_id</code>.</li><li>ADD must leave <code>_id</code> blank. The optional <code>image_url</code> is fetched and uploaded through the existing Cloudinary backend flow.</li><li>For UPDATE, unchanged <code>image_url</code> values are preserved without re-uploading.</li><li>Rows are validated before any request is sent.</li><li>Existing backend authorization remains in force: only Master Admin can create, update, or delete.</li></ul></div>
           <div className="flex flex-wrap gap-2"><button onClick={() => exportExcel(items).catch((err) => toast.error(err.message))} className="btn-ghost inline-flex items-center gap-2"><Download size={16}/> Download Excel</button><button onClick={() => exportJson(items)} className="btn-ghost inline-flex items-center gap-2"><FileJson size={16}/> Download JSON</button><button onClick={() => fileRef.current?.click()} className="btn-primary inline-flex items-center gap-2"><Upload size={16}/> Select Excel / JSON</button><input ref={fileRef} type="file" accept=".xlsx,.xls,.json,application/json,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" className="hidden" onChange={(e) => readFile(e.target.files?.[0])} /></div>
-          <div className="overflow-auto rounded-xl border border-dark-600">{preview ? <table className="w-full text-xs"><thead className="bg-dark-700 text-gray-400"><tr><th className="p-2 text-left">Row</th><th className="p-2 text-left">Operation</th><th className="p-2 text-left">ID</th><th className="p-2 text-left">Name</th><th className="p-2 text-left">Category</th><th className="p-2 text-right">Price</th></tr></thead><tbody>{preview.rows.slice(0, 100).map((row, i) => <tr key={`${row._id}-${i}`} className="border-t border-dark-700"><td className="p-2">{i + 2}</td><td className="p-2">{row.operation}</td><td className="p-2 font-mono">{row._id || 'new'}</td><td className="p-2">{row.name}</td><td className="p-2">{row.category}</td><td className="p-2 text-right">{row.price}</td></tr>)}</tbody></table> : <div className="p-10 text-center text-gray-500">Choose a file to validate its rows.</div>}</div>
+          <div className="overflow-auto rounded-xl border border-dark-600">{preview ? <table className="w-full text-xs"><thead className="bg-dark-700 text-gray-400"><tr><th className="p-2 text-left">Row</th><th className="p-2 text-left">Operation</th><th className="p-2 text-left">ID</th><th className="p-2 text-left">Name</th><th className="p-2 text-left">Category</th><th className="p-2 text-right">Price</th><th className="p-2 text-left">Image URL</th></tr></thead><tbody>{preview.rows.slice(0, 100).map((row, i) => <tr key={`${row._id}-${i}`} className="border-t border-dark-700"><td className="p-2">{i + 2}</td><td className="p-2">{row.operation}</td><td className="p-2 font-mono">{row._id || 'new'}</td><td className="p-2">{row.name}</td><td className="p-2">{row.category}</td><td className="p-2 text-right">{row.price}</td><td className="p-2 max-w-xs truncate" title={row.image_url}>{row.image_url || '—'}</td></tr>)}</tbody></table> : <div className="p-10 text-center text-gray-500">Choose a file to validate its rows.</div>}</div>
           {preview?.errors?.length > 0 && <div className="rounded-xl border border-red-500/30 bg-red-500/5 p-4"><div className="flex gap-2 text-red-300 font-semibold"><AlertTriangle size={17}/> Validation errors</div><ul className="mt-2 list-disc pl-5 text-xs text-red-300 space-y-1 max-h-40 overflow-auto">{preview.errors.map((error) => <li key={error}>{error}</li>)}</ul></div>}
           {preview?.result && <div className="rounded-xl border border-dark-500 bg-dark-800 p-4 text-sm text-gray-300">Saved: {preview.result.added} added · {preview.result.updated} updated · {preview.result.deleted} deleted · {preview.result.failed.length} failed.</div>}
         </div>
