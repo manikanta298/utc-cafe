@@ -54,13 +54,16 @@ const imageUrlToFile = async (imageUrl) => {
   return new File([blob], `menu-image-${Date.now()}.${extension}`, { type: blob.type });
 };
 
+const normaliseCategory = (value) => String(value || '').trim().replace(/\s+/g, ' ');
+const categoryKey = (value) => normaliseCategory(value).toLocaleLowerCase();
+
 const normaliseRow = (row) => ({
   ...row,
   operation: String(row.operation || 'UPDATE').trim().toUpperCase(),
   _id: row._id ? String(row._id).trim() : '',
   name: row.name === undefined ? '' : String(row.name).trim(),
   description: row.description === undefined ? '' : String(row.description),
-  category: row.category === undefined ? '' : String(row.category).trim(),
+  category: normaliseCategory(row.category),
   price: row.price === '' || row.price === undefined ? '' : Number(row.price),
   gst_rate: row.gst_rate === '' || row.gst_rate === undefined ? 5 : Number(row.gst_rate),
   hsn_code: row.hsn_code === undefined ? '' : String(row.hsn_code).trim(),
@@ -176,7 +179,7 @@ const ItemModal = ({ item, categories, onClose, onSaved }) => {
           <div className="grid grid-cols-2 gap-4">
             <div className="col-span-2"><label className="label">Item Name *</label><input className="input" required value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} /></div>
             <div className="col-span-2"><label className="label">Description</label><textarea className="input resize-none" rows={2} value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} /></div>
-            <div><label className="label">Category *</label><select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required><option value="">Select category</option>{categories.map((c) => <option key={c._id} value={c.name}>{c.name}</option>)}</select></div>
+            <div><label className="label">Category *</label><select className="input" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} required><option value="">Select category</option>{categories.map((c) => <option key={c.key} value={c.name}>{c.name}</option>)}</select></div>
             <div><label className="label">Price (₹) *</label><input className="input" type="number" min="0" step="0.01" required value={form.price} onChange={(e) => setForm({ ...form, price: e.target.value })} /></div>
             <div><label className="label">GST Rate (%)</label><select className="input" value={form.gst_rate} onChange={(e) => setForm({ ...form, gst_rate: Number(e.target.value) })}>{GST_RATES.map((r) => <option key={r} value={r}>{r}%</option>)}</select></div>
             <div><label className="label">HSN Code</label><input className="input" value={form.hsn_code} onChange={(e) => setForm({ ...form, hsn_code: e.target.value })} /></div>
@@ -259,7 +262,6 @@ const BulkMenuModal = ({ items, onClose, onComplete }) => {
 
 export default function MasterMenuPage() {
   const [items, setItems] = useState([]);
-  const [categories, setCategories] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
@@ -268,19 +270,28 @@ export default function MasterMenuPage() {
   const [modal, setModal] = useState(null);
   const [toggling, setToggling] = useState(null);
   const searchTimer = useRef(null);
-  const loadCategories = useCallback(async () => { try { const res = await api.get('/categories'); setCategories(res.data.categories || []); } catch { toast.error('Failed to load categories'); } }, []);
   const load = useCallback(async () => { setLoading(true); try { const res = await api.get('/menu/all'); setItems(res.data.items || []); } catch { toast.error('Failed to load menu'); } finally { setLoading(false); } }, []);
-  useEffect(() => { load(); loadCategories(); return () => clearTimeout(searchTimer.current); }, [load, loadCategories]);
+  useEffect(() => { load(); return () => clearTimeout(searchTimer.current); }, [load]);
+  const categories = useMemo(() => {
+    const map = new Map();
+    items.forEach((item) => {
+      const name = normaliseCategory(item.category);
+      const key = categoryKey(name);
+      if (name && !map.has(key)) map.set(key, { key, name });
+    });
+    return Array.from(map.values()).sort((a, b) => a.name.localeCompare(b.name));
+  }, [items]);
   const handleDelete = useCallback(async (id) => { if (!confirm('Delete this item?')) return; try { await api.delete(`/menu/${id}`); toast.success('Item deleted'); await load(); } catch (err) { toast.error(err.response?.data?.message || 'Delete failed'); } }, [load]);
   const handleGlobalToggle = useCallback(async (item) => { setToggling(item._id); try { const res = await api.patch(`/menu/${item._id}/global-toggle`); toast.success(`${item.name} → ${res.data.isGlobalActive ? '✅ Active' : '⛔ Inactive'}`); await load(); } catch (err) { toast.error(err.response?.data?.message || 'Toggle failed'); } finally { setToggling(null); } }, [load]);
   const counts = useMemo(() => ({ all: items.length, active: items.filter((i) => i.isGlobalActive).length, inactive: items.filter((i) => !i.isGlobalActive).length }), [items]);
-  const filtered = useMemo(() => items.filter((i) => { const needle = debouncedSearch.toLowerCase(); return (!needle || i.name.toLowerCase().includes(needle)) && (!catFilter || i.category === catFilter) && (statusTab === 'all' || (statusTab === 'active' ? i.isGlobalActive : !i.isGlobalActive)); }), [items, debouncedSearch, catFilter, statusTab]);
+  const filtered = useMemo(() => items.filter((i) => { const needle = debouncedSearch.toLowerCase(); const itemCategoryKey = categoryKey(i.category); return (!needle || i.name.toLowerCase().includes(needle)) && (!catFilter || itemCategoryKey === catFilter) && (statusTab === 'all' || (statusTab === 'active' ? i.isGlobalActive : !i.isGlobalActive)); }), [items, debouncedSearch, catFilter, statusTab]);
   const handleSearchChange = (e) => { const value = e.target.value; setSearch(value); clearTimeout(searchTimer.current); searchTimer.current = setTimeout(() => setDebouncedSearch(value), 250); };
+  useEffect(() => { if (catFilter && !categories.some((category) => category.key === catFilter)) setCatFilter(''); }, [categories, catFilter]);
   return (
     <div className="animate-fade-in">
       <div className="page-header"><div><h1 className="section-title">Menu Management</h1><p className="text-gray-500 text-sm mt-1">{counts.active} active · {counts.inactive} inactive · {counts.all} total</p></div><div className="flex gap-2 flex-wrap"><button onClick={() => setModal('bulk')} className="btn-ghost flex items-center gap-2"><FileSpreadsheet size={18}/> Bulk Excel / JSON</button><button onClick={() => setModal('new')} className="btn-primary flex items-center gap-2"><Plus size={18}/> Add Item</button></div></div>
       <div className="flex gap-2 flex-wrap mb-4">{STATUS_TABS.map(({ key, label }) => <button key={key} onClick={() => setStatusTab(key)} className={`px-4 py-1.5 rounded-full text-xs font-semibold border ${statusTab === key ? 'bg-brand-500 border-brand-500 text-white' : 'bg-dark-700 border-dark-500 text-gray-400 hover:text-white'}`}>{label}<span className={`ml-1.5 px-1.5 py-0.5 rounded-full text-[10px] ${statusTab === key ? 'bg-white/20' : 'bg-dark-600'}`}>{counts[key]}</span></button>)}</div>
-      <div className="flex flex-wrap gap-3 mb-6"><div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input className="input pl-9 w-56" placeholder="Search items..." value={search} onChange={handleSearchChange}/></div><div className="flex gap-2 flex-wrap"><button onClick={() => setCatFilter('')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${catFilter === '' ? 'bg-brand-500 text-white' : 'bg-dark-700 text-gray-500 hover:text-white'}`}>All</button>{categories.map((c) => <button key={c._id} onClick={() => setCatFilter(c.name)} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${catFilter === c.name ? 'bg-brand-500 text-white' : 'bg-dark-700 text-gray-500 hover:text-white'}`}>{c.name}</button>)}</div></div>
+      <div className="flex flex-wrap gap-3 mb-6 items-center"><div className="relative"><Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"/><input className="input pl-9 w-56" placeholder="Search items..." value={search} onChange={handleSearchChange}/></div><div className="flex items-center gap-2 flex-wrap"><span className="text-xs font-semibold uppercase tracking-wide text-gray-600">Categories</span><button onClick={() => setCatFilter('')} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${catFilter === '' ? 'bg-brand-500 text-white' : 'bg-dark-700 text-gray-500 hover:text-white'}`}>All</button>{categories.map((category) => <button key={category.key} onClick={() => setCatFilter(category.key)} className={`px-3 py-1.5 rounded-lg text-xs font-medium ${catFilter === category.key ? 'bg-brand-500 text-white' : 'bg-dark-700 text-gray-500 hover:text-white'}`}>{category.name}</button>)}</div></div>
       {loading ? <div className="flex justify-center py-16"><div className="w-8 h-8 border-2 border-brand-500 border-t-transparent rounded-full animate-spin"/></div> : filtered.length === 0 ? <div className="flex flex-col items-center justify-center py-20 text-center"><div className="text-4xl mb-3">🍽️</div><p className="text-gray-500 text-sm">No items match this filter</p><button onClick={() => { setStatusTab('all'); setCatFilter(''); setSearch(''); setDebouncedSearch(''); }} className="mt-3 text-xs text-brand-400 hover:underline">Clear filters</button></div> : <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">{filtered.map((item) => <div key={item._id} className={`card-hover overflow-hidden group ${!item.isGlobalActive ? 'opacity-60' : ''}`}><div className="h-40 bg-dark-700 relative overflow-hidden">{item.image?.url ? <img src={item.image.url} alt={item.name} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"/> : <div className="w-full h-full flex items-center justify-center text-4xl">🍽️</div>}<div className="absolute top-2 left-2"><span className={`px-2 py-1 rounded-full text-[10px] font-bold ${item.isGlobalActive ? 'bg-green-500/90 text-white' : 'bg-gray-700 text-gray-300'}`}>{item.isGlobalActive ? 'ACTIVE' : 'INACTIVE'}</span></div><div className="absolute top-2 right-2"><span className={`px-2 py-1 rounded-full text-[10px] ${item.isVeg ? 'bg-green-500/90 text-white' : 'bg-red-500/90 text-white'}`}>{item.isVeg ? 'VEG' : 'NON-VEG'}</span></div></div><div className="p-4"><div className="flex items-start justify-between gap-2"><div><h3 className="font-semibold text-white">{item.name}</h3><p className="text-xs text-gray-500 mt-1">{item.category}</p></div><span className="font-bold text-brand-400">₹{Number(item.price || 0).toFixed(2)}</span></div>{item.description && <p className="text-xs text-gray-500 mt-2 line-clamp-2">{item.description}</p>}<div className="flex items-center justify-between mt-4 pt-3 border-t border-dark-600"><button onClick={() => handleGlobalToggle(item)} disabled={toggling === item._id} className="text-xs text-gray-400 hover:text-white flex items-center gap-1">{item.isGlobalActive ? <ToggleRight size={18}/> : <ToggleLeft size={18}/>} {toggling === item._id ? 'Saving...' : item.isGlobalActive ? 'Disable' : 'Enable'}</button><div className="flex gap-1"><button onClick={() => setModal(item)} className="p-2 rounded-lg text-gray-500 hover:text-white hover:bg-dark-600"><Pencil size={15}/></button><button onClick={() => handleDelete(item._id)} className="p-2 rounded-lg text-gray-500 hover:text-red-400 hover:bg-dark-600"><Trash2 size={15}/></button></div></div></div></div>)}</div>}
       {modal === 'bulk' && <BulkMenuModal items={items} onClose={() => setModal(null)} onComplete={load}/>} 
       {modal && modal !== 'bulk' && <ItemModal item={modal === 'new' ? null : modal} categories={categories} onClose={() => setModal(null)} onSaved={async () => { setModal(null); await load(); }}/>} 
