@@ -8,6 +8,11 @@ cloudinary.config({
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
 
+const imageFilter = (req, file, cb) => {
+  if (file.mimetype.startsWith('image/')) cb(null, true);
+  else cb(new Error('Only image files are allowed'), false);
+};
+
 // Menu item image storage
 const menuStorage = new CloudinaryStorage({
   cloudinary,
@@ -21,13 +26,23 @@ const menuStorage = new CloudinaryStorage({
 const uploadMenuImage = multer({
   storage: menuStorage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith('image/')) {
-      cb(null, true);
-    } else {
-      cb(new Error('Only image files are allowed'), false);
-    }
+  fileFilter: imageFilter,
+}).single('image');
+
+// Category image storage
+const categoryStorage = new CloudinaryStorage({
+  cloudinary,
+  params: {
+    folder: 'utc-cafe/categories',
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp'],
+    transformation: [{ width: 800, height: 500, crop: 'fill', quality: 'auto' }],
   },
+});
+
+const uploadCategoryImage = multer({
+  storage: categoryStorage,
+  limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
+  fileFilter: imageFilter,
 }).single('image');
 
 // Delete image from Cloudinary
@@ -40,4 +55,4 @@ const deleteImage = async (publicId) => {
   }
 };
 
-module.exports = { cloudinary, uploadMenuImage, deleteImage };
+module.exports = { cloudinary, uploadMenuImage, uploadCategoryImage, deleteImage };

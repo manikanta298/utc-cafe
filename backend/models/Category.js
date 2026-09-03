@@ -5,6 +5,10 @@ const categorySchema = new mongoose.Schema(
     name:      { type: String, required: true, trim: true, unique: true },
     color:     { type: String, default: '#f97316' }, // hex for UI badge
     icon:      { type: String, default: '🍽️' },
+    image: {
+      url:       { type: String, default: '' },
+      public_id: { type: String, default: '' },
+    },
     sortOrder: { type: Number, default: 0 },
     isActive:  { type: Boolean, default: true },
   },
