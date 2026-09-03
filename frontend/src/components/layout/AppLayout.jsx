@@ -3,7 +3,6 @@ import {
   Coffee, LayoutDashboard, Store, UtensilsCrossed, Users, Receipt,
   FileText, ChefHat, LogOut, Menu, X, History, Lock, Tag,
   Shield, BarChart2, MapPin, IndianRupee, TrendingUp, Search, Package,
-  ListTree,
 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import useAuthStore from '../../store/authStore';
@@ -16,7 +15,6 @@ const MASTER_NAV = [
   { to: '/master/dashboard',       icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/master/franchises',      icon: Store,           label: 'Franchises' },
   { to: '/master/menu',            icon: UtensilsCrossed, label: 'Menu' },
-  { to: '/master/categories',      icon: ListTree,        label: 'Categories' },
   { to: '/master/customers',       icon: Users,           label: 'Customers' },
   { to: '/master/invoices',        icon: FileText,        label: 'Invoices & GST' },
   { to: '/master/coupons',         icon: Tag,             label: 'Coupons' },
