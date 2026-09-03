@@ -268,6 +268,9 @@ const BulkMenuModal = ({ items, onClose, onComplete }) => {
       else toast.success(`Bulk update complete: ${results.added} added, ${results.updated} updated, ${results.deleted} deleted.`);
       await onComplete();
       setPreview({ ...preview, result: results });
+    } catch (err) {
+      toast.error(err.response?.data?.message || err.message || 'Could not refresh the menu after bulk update');
+      setPreview({ ...preview, result: results });
     } finally { setBusy(false); }
   };
   return (
