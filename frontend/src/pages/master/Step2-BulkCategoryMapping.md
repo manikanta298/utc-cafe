@@ -1,32 +1,30 @@
 # Step 2 — Bulk Category Mapping
 
-## Goal
-
-Make the uploaded Excel/JSON menu file the preflight source for dynamic category discovery without introducing a second category-management workflow.
+The Excel/JSON import is the non-destructive preflight source for dynamic category discovery.
 
 ## Algorithm
 
-1. Parse Excel or JSON into rows.
-2. Normalize each `category` value by trimming and collapsing whitespace.
+1. Parse Excel or JSON rows.
+2. Normalize `category` by trimming and collapsing whitespace.
 3. Generate a case-insensitive category key.
-4. Build a `Map` keyed by the normalized category key.
-5. Count imported rows for each category.
-6. Compare each imported category against the current menu item data.
-7. Mark each category as `EXISTING` or `NEW` in the preview.
-8. Reject duplicate `_id` values before any mutation request.
-9. Only after the administrator presses Apply are menu API mutations sent.
-10. Reload `/menu/all` after completion; dynamic category filters are then recalculated from persisted menu data.
+4. Build a `Map` of unique categories and count imported rows.
+5. Compare imported categories with current menu data.
+6. Mark each category `EXISTING` or `NEW` in the preview.
+7. Reject duplicate `_id` values before mutation.
+8. Apply only after administrator confirmation.
+9. Reload `/menu/all` and recalculate live category filters from persisted menu data.
 
 ## Image handling
 
-The existing `image_url` field is part of the bulk schema. For ADD/UPDATE rows, a valid HTTP/HTTPS image URL is fetched in the browser as an image file and passed through the existing backend Cloudinary upload flow. An unchanged UPDATE URL is not re-uploaded.
+`image_url` is the supported bulk image field. Valid HTTP/HTTPS URLs are fetched as image files and sent through the existing backend Cloudinary flow. An unchanged UPDATE image URL is preserved without another upload. Manual Add/Edit continues to support local file upload.
 
-A persistent `category_image_url` field is intentionally not included yet because the current backend Category schema has no image property. Adding it safely requires an explicit backend schema/API change and will be handled as a separate step.
+Binary image files are not embedded into Excel/JSON; the portable bulk format uses image URLs.
 
-## Safety properties
+The current backend Category schema has no image property, so persistent `category_image_url` support is intentionally deferred to a separate backend step rather than silently changing the architecture.
 
-- Preview is non-destructive.
+## Safety
+
+- Preview does not mutate server data.
 - Existing backend authorization remains authoritative.
-- No Cloudinary credentials are exposed in the frontend.
-- Existing franchise-specific menu state is not modified by the category mapping layer.
-- Bulk execution remains compatible with the existing ADD/UPDATE/DELETE APIs.
+- Cloudinary credentials are never exposed in frontend code.
+- Existing franchise-specific menu state is not changed by category mapping.
