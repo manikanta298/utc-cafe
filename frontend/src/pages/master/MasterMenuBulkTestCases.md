@@ -1,8 +1,23 @@
 # Master Menu Bulk Update — Test Cases
 
-Scope: `frontend/src/pages/master/MasterMenuPage.jsx` only. These cases cover the Master Admin Excel/JSON workflow, existing manual CRUD, Cloudinary image upload/URL workflows, validation, franchise propagation, and regression risks.
+Scope: Master Admin menu bulk workflow plus the minimal shared-layout sidebar change required for Step 1/2. These cases cover Excel/JSON import, dynamic category mapping, existing manual CRUD, Cloudinary image URL workflows, validation, franchise propagation, and regression risks.
 
-## Functional tests
+## Step 2 — Dynamic category mapping tests
+
+| ID | Scenario | Steps | Expected |
+|---|---|---|---|
+| CAT-001 | New category in import | Upload a valid ADD row with a category not currently used by menu items | Preview marks the category `NEW`; after Apply and reload, the new category appears automatically beside search. |
+| CAT-002 | Existing category in import | Upload rows using an existing category | Preview marks the category `EXISTING` and shows current item count. |
+| CAT-003 | Case variation | Import `Beverages`, `beverages`, and `BEVERAGES` | Preview resolves them to one normalized category mapping. |
+| CAT-004 | Whitespace variation | Import `  Cold   Drinks  ` and `Cold Drinks` | Preview resolves them to one normalized category mapping. |
+| CAT-005 | Multiple categories | Import rows for several categories | Every distinct normalized category is displayed in the mapping preview. |
+| CAT-006 | Category filter after import | Apply an import containing a new category, then select its filter | New category filter returns only matching menu items. |
+| CAT-007 | Category removal | Delete/update the last item belonging to a category | The category disappears from dynamic filters after the menu reload. |
+| CAT-008 | Selected filter disappears | Select a category, then remove its last item | Selected category filter is automatically cleared instead of leaving an empty locked filter. |
+| CAT-009 | Import preview does not mutate | Upload a file but do not press Apply | No menu mutation request occurs; mapping is preview-only. |
+| CAT-010 | Duplicate IDs | Upload two rows with the same `_id` | Validation fails before any mutation request is sent. |
+
+## Existing functional tests
 
 | ID | Scenario | Steps | Expected |
 |---|---|---|---|
@@ -62,35 +77,36 @@ Scope: `frontend/src/pages/master/MasterMenuPage.jsx` only. These cases cover th
 | SEC-003 | XSS strings in spreadsheet | Text is rendered as React text, not executable HTML. |
 | SEC-004 | Large sheet | Preview is capped to the first 100 rows while all validated rows remain eligible for Apply. |
 | SEC-005 | Refresh after import | Master list is reloaded from `/menu/all`, so UI reflects persisted server state. |
-| SEC-006 | Existing architecture | No backend model, route, controller, package manifest, or global layout file is changed by this feature. |
+| SEC-006 | Architecture safety | Backend models/routes/controllers remain unchanged for this step; only the Master Menu page and the minimal shared sidebar entry are changed. |
 | SEC-007 | Image URL protocol validation | `image_url` accepts only HTTP/HTTPS URLs; malformed schemes are rejected before API calls. |
 | SEC-008 | Cloudinary credential safety | No Cloudinary API secret or upload secret is embedded in the frontend source. |
 | SEC-009 | Existing Cloudinary lifecycle | Image replacement/removal remains delegated to the existing backend Cloudinary helper rather than manipulating Cloudinary credentials in the browser. |
 | SEC-010 | Unchanged image efficiency | Bulk UPDATE with the current `image_url` does not trigger an unnecessary image upload. |
 
+## Important Step 2 limitation
+
+The current backend `Category` schema stores `name`, `color`, `icon`, `sortOrder`, and `isActive`; it has no category image field. Therefore this step does **not** pretend that `category_image_url` is persistently supported. Menu-item `image_url` is fully supported through the existing Cloudinary flow. Persistent category-image upload/URL support requires a small, explicit backend schema/API extension and should be treated as the next isolated step rather than silently changing the architecture.
+
 ## Code-review checklist
 
-- Confirm changes are limited to `frontend/src/pages/master/`.
-- Confirm existing `/menu`, `/menu/:id`, `/menu/:id/global-toggle`, and `/menu/:id/toggle` API contracts are not changed.
-- Confirm bulk validation occurs before the first mutation request.
-- Confirm ADD does not accept client-supplied `_id`.
-- Confirm UPDATE/DELETE require `_id`.
-- Confirm failed rows are isolated and reported with spreadsheet row numbers.
-- Confirm existing images are preserved unless a new file/URL is supplied or removal is explicitly requested.
-- Confirm URL images are uploaded through the existing backend Cloudinary flow rather than exposing Cloudinary credentials in the browser.
-- Confirm no unnecessary re-upload occurs for unchanged `image_url` values.
+- Confirm dynamic category mapping is derived from imported rows before Apply.
+- Confirm normalized category keys are case-insensitive and whitespace-safe.
+- Confirm previewing an import never mutates server state.
+- Confirm duplicate `_id` values are rejected before mutations.
+- Confirm new categories appear automatically after successful menu reload.
+- Confirm category filters are derived from menu items, not the standalone Categories API.
+- Confirm menu-item image URLs use the existing backend Cloudinary flow.
+- Confirm no Cloudinary credentials are exposed in frontend code.
 - Confirm Master Admin reloads server state after bulk completion.
-- Confirm existing franchise-specific disable state is not overwritten by the frontend bulk workflow.
-- Confirm the SheetJS loader remains lazy and only loads when Excel functionality is used.
+- Confirm franchise-specific disable state is not overwritten by the frontend bulk workflow.
+- Confirm no backend schema/controller changes were introduced in this step.
 
 ## Acceptance criteria
 
-- Master Admin can download current menu data as Excel and JSON.
-- Master Admin can upload Excel or JSON and preview/validate changes before applying them.
-- ADD, UPDATE, and DELETE operations are supported.
-- Existing manual add/edit/delete/toggle functionality remains available.
-- Menu images can be supplied by file upload or HTTP/HTTPS URL; URL images are routed through the existing backend Cloudinary upload path.
-- Bulk exports include the current image URL so menu data can be round-tripped without losing image references.
-- Bulk operations use the existing protected menu APIs, so authorization and franchise propagation stay within the existing architecture.
-- Failed rows are reported without hiding successful operations.
-- No files outside `frontend/src/pages/master/` are modified for this feature.
+- Bulk Excel/JSON imports provide a clear preflight dynamic category mapping preview.
+- New categories in imported menu data automatically become available as Menu Management filters after Apply and reload.
+- Category names with case/whitespace differences resolve to one filter category.
+- Duplicate IDs are rejected before mutation.
+- Existing ADD/UPDATE/DELETE and manual CRUD workflows remain functional.
+- Menu images can be supplied by file upload or HTTP/HTTPS URL and URL images use the existing backend Cloudinary path.
+- No unsupported category-image persistence is falsely represented; that capability remains isolated for a future backend step.
