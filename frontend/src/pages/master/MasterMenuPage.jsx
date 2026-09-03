@@ -247,27 +247,28 @@ const BulkMenuModal = ({ items, onClose, onComplete }) => {
     if (!preview || preview.errors.length) return;
     setBusy(true);
     const results = { added: 0, updated: 0, deleted: 0, failed: [] };
-    for (const row of preview.rows) {
-      try {
-        if (row.operation === 'DELETE') { await api.delete(`/menu/${row._id}`); results.deleted += 1; continue; }
-        const fd = new FormData();
-        ['name','description','category','price','gst_rate','hsn_code','isVeg','preparationTime','isGlobalActive','sortOrder','stock_enabled','stock_qty','unit','low_stock_threshold'].forEach((key) => fd.append(key, row[key]));
-        if (row.image_url) {
-          if (row.operation === 'UPDATE' && row.currentItem?.image?.url === row.image_url) {
-            // Preserve the current Cloudinary image without re-uploading it.
-          } else {
-            fd.append('image', await imageUrlToFile(row.image_url));
+    try {
+      for (const row of preview.rows) {
+        try {
+          if (row.operation === 'DELETE') { await api.delete(`/menu/${row._id}`); results.deleted += 1; continue; }
+          const fd = new FormData();
+          ['name','description','category','price','gst_rate','hsn_code','isVeg','preparationTime','isGlobalActive','sortOrder','stock_enabled','stock_qty','unit','low_stock_threshold'].forEach((key) => fd.append(key, row[key]));
+          if (row.image_url) {
+            if (row.operation === 'UPDATE' && row.currentItem?.image?.url === row.image_url) {
+              // Preserve the current Cloudinary image without re-uploading it.
+            } else {
+              fd.append('image', await imageUrlToFile(row.image_url));
+            }
           }
-        }
-        if (row.operation === 'ADD') { await api.post('/menu', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); results.added += 1; }
-        else { await api.put(`/menu/${row._id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); results.updated += 1; }
-      } catch (err) { results.failed.push({ row, message: err.response?.data?.message || err.message || 'Request failed' }); }
-    }
-    if (results.failed.length) toast.error(`${results.failed.length} row(s) failed. Successful rows were saved.`);
-    else toast.success(`Bulk update complete: ${results.added} added, ${results.updated} updated, ${results.deleted} deleted.`);
-    await onComplete();
-    setPreview({ ...preview, result: results });
-    setBusy(false);
+          if (row.operation === 'ADD') { await api.post('/menu', fd, { headers: { 'Content-Type': 'multipart/form-data' } }); results.added += 1; }
+          else { await api.put(`/menu/${row._id}`, fd, { headers: { 'Content-Type': 'multipart/form-data' } }); results.updated += 1; }
+        } catch (err) { results.failed.push({ row, message: err.response?.data?.message || err.message || 'Request failed' }); }
+      }
+      if (results.failed.length) toast.error(`${results.failed.length} row(s) failed. Successful rows were saved.`);
+      else toast.success(`Bulk update complete: ${results.added} added, ${results.updated} updated, ${results.deleted} deleted.`);
+      await onComplete();
+      setPreview({ ...preview, result: results });
+    } finally { setBusy(false); }
   };
   return (
     <div className="fixed inset-0 bg-black/70 backdrop-blur-sm flex items-center justify-center z-[70] p-4">
