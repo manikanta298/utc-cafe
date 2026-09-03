@@ -1,5 +1,5 @@
 [
-  {"operation":"ADD","name":"Cold Coffee","description":"Chilled coffee","category":"  Beverages  ","price":120,"gst_rate":5,"isVeg":true,"preparationTime":8,"isGlobalActive":true,"sortOrder":1,"stock_enabled":false,"stock_qty":0,"unit":"pcs","low_stock_threshold":10,"image_url":"https://images.example.com/cold-coffee.jpg"},
+  {"operation":"ADD","name":"Cold Coffee","description":"Chilled coffee","category":"  Beverages  ","price":120,"gst_rate":5,"isVeg":true,"preparationTime":8,"isGlobalActive":true,"sortOrder":1,"stock_enabled":false,"stock_qty":0,"unit":"pcs","low_stock_threshold":10,"image_url":""},
   {"operation":"ADD","name":"Iced Tea","description":"Chilled tea","category":"beverages","price":90,"gst_rate":5,"isVeg":true,"preparationTime":5,"isGlobalActive":true,"sortOrder":2,"stock_enabled":false,"stock_qty":0,"unit":"pcs","low_stock_threshold":10,"image_url":""},
   {"operation":"ADD","name":"Paneer Wrap","description":"Fresh paneer wrap","category":"  Wraps   ","price":150,"gst_rate":5,"isVeg":true,"preparationTime":12,"isGlobalActive":true,"sortOrder":1,"stock_enabled":true,"stock_qty":20,"unit":"pcs","low_stock_threshold":5,"image_url":""}
 ]
