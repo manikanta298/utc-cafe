@@ -1,12 +1,13 @@
 const express = require('express');
 const router = express.Router();
-const { getMenu, getAllMenu, createMenuItem, updateMenuItem, deleteMenuItem, toggleFranchiseItem, toggleGlobalActive } = require('../controllers/menuController');
+const { getMenu, getAllMenu, createMenuItem, updateMenuItem, deleteMenuItem, toggleFranchiseItem, toggleGlobalActive, bulkSyncMenu } = require('../controllers/menuController');
 const { protect, authorise } = require('../middleware/auth');
 const { enforceActiveFranchise } = require('../middleware/franchiseGuard');
 
 router.get('/', protect, enforceActiveFranchise, getMenu);
 router.get('/all', protect, enforceActiveFranchise, authorise('master_admin', 'franchise_owner', 'manager'), getAllMenu);
 router.post('/', protect, authorise('master_admin'), createMenuItem);
+router.post('/bulk-sync', protect, authorise('master_admin'), bulkSyncMenu);
 router.put('/:id', protect, authorise('master_admin'), updateMenuItem);
 router.delete('/:id', protect, authorise('master_admin'), deleteMenuItem);
 // quick active/inactive toggle for master admin (no multer needed)
