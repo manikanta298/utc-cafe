@@ -68,19 +68,11 @@ const buildCustomerInsights = async (req, customerId) => {
   const visitDays = new Set();
 
   for (const order of orders) {
-    if (new Date(order.createdAt) >= recentCutoff) {
-      visitDays.add(new Date(order.createdAt).toDateString());
-    }
-
+    if (new Date(order.createdAt) >= recentCutoff) visitDays.add(new Date(order.createdAt).toDateString());
     for (const item of order.items || []) {
       const existing = purchaseMap.get(item.name) || {
-        name: item.name,
-        quantity: 0,
-        orders: 0,
-        amount: 0,
-        lastPurchasedAt: order.createdAt,
+        name: item.name, quantity: 0, orders: 0, amount: 0, lastPurchasedAt: order.createdAt,
       };
-
       existing.quantity += Number(item.quantity || 0);
       existing.orders += 1;
       existing.amount += Number(item.item_total || 0);
@@ -95,22 +87,17 @@ const buildCustomerInsights = async (req, customerId) => {
 
   const activityHistory = [
     ...orders.slice(0, 10).map((order) => ({
-      id: `order-${order._id}`,
-      date: order.createdAt,
-      title: `Order ${order.order_number}`,
+      id: `order-${order._id}`, date: order.createdAt, title: `Order ${order.order_number}`,
       description: `${formatCurrency(order.final_amount)} · ${order.payment_mode} · ${order.kitchen_status}`,
     })),
     ...loyaltyHistory.slice(0, 10).map((entry) => ({
-      id: `loyalty-${entry._id}`,
-      date: entry.createdAt,
+      id: `loyalty-${entry._id}`, date: entry.createdAt,
       title: entry.transaction_type === 'redeem' ? 'Loyalty redeemed' : 'Loyalty earned',
       description: entry.transaction_type === 'redeem'
         ? `${entry.points_used || 0} points redeemed · Balance ${entry.balance_after || 0}`
         : `${entry.points_earned || 0} points earned · Balance ${entry.balance_after || 0}`,
     })),
-  ]
-    .sort((a, b) => new Date(b.date) - new Date(a.date))
-    .slice(0, 20);
+  ].sort((a, b) => new Date(b.date) - new Date(a.date)).slice(0, 20);
 
   return {
     recentOrders: orders.slice(0, 10),
@@ -127,6 +114,16 @@ const buildCustomerInsights = async (req, customerId) => {
   };
 };
 
+const serializeCustomerForPos = (customer) => {
+  if (!customer) return null;
+  return {
+    ...customer,
+    total_points: Number(customer.total_points || 0),
+    loyalty_points: Number(customer.total_points || 0),
+    total_visits: Number(customer.total_orders || 0),
+  };
+};
+
 // @GET /api/customers/lookup?mobile=XXXXXXXXXX or ?phone=XXXXXXXXXX
 const lookupByPhone = async (req, res) => {
   try {
@@ -137,25 +134,20 @@ const lookupByPhone = async (req, res) => {
     const isNew = !customer;
 
     if (!customer) {
-      return res.json({
-        success: true,
-        customer: null,
-        exists: false,
-        isNew: true,
-        pointsValue: 0,
-        recentOrders: [],
-        customerInsights: emptyInsights(),
-      });
+      return res.json({ success: true, customer: null, exists: false, isNew: true, pointsValue: 0, loyalty_points: 0, recentOrders: [], customerInsights: emptyInsights() });
     }
 
     const { recentOrders, customerInsights } = await buildCustomerInsights(req, customer._id);
+    const posCustomer = serializeCustomerForPos(customer);
 
     res.json({
       success: true,
-      customer,
+      customer: posCustomer,
       exists: true,
       isNew,
-      pointsValue: calculatePointsValue(customer.total_points),
+      points: posCustomer.total_points,
+      loyalty_points: posCustomer.loyalty_points,
+      pointsValue: calculatePointsValue(posCustomer.total_points),
       recentOrders,
       customerInsights,
     });
@@ -164,49 +156,28 @@ const lookupByPhone = async (req, res) => {
   }
 };
 
-// @POST /api/customers
 const createCustomer = async (req, res) => {
   try {
     const payload = normalizeCustomerPayload(req.body);
-    if (!payload.phone_no || !payload.name) {
-      return res.status(400).json({ success: false, message: 'Phone and name required' });
-    }
-
+    if (!payload.phone_no || !payload.name) return res.status(400).json({ success: false, message: 'Phone and name required' });
     const exists = await Customer.findOne({ phone_no: payload.phone_no });
     if (exists) return res.json({ success: true, customer: exists, isNew: false });
-
     const franchiseId = req.user.franchise_id?._id || req.user.franchise_id;
-    const customer = await Customer.create({
-      ...payload,
-      first_franchise: franchiseId,
-    });
-
+    const customer = await Customer.create({ ...payload, first_franchise: franchiseId });
     res.status(201).json({ success: true, customer, isNew: true });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 
-// @PUT /api/customers/:id
 const updateCustomer = async (req, res) => {
   try {
     const updates = normalizeCustomerPayload(req.body);
     delete updates.phone_no;
-
-    const customer = await Customer.findByIdAndUpdate(
-      req.params.id,
-      { $set: updates },
-      { new: true, runValidators: true }
-    );
-
+    const customer = await Customer.findByIdAndUpdate(req.params.id, { $set: updates }, { new: true, runValidators: true });
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
     res.json({ success: true, customer });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 
-// @GET /api/customers
 const getCustomers = async (req, res) => {
   try {
     const { page = 1, limit = 20, search } = req.query;
@@ -219,38 +190,22 @@ const getCustomers = async (req, res) => {
         { city: { $regex: search, $options: 'i' } },
       ];
     }
-
     const skip = (page - 1) * limit;
     const [customers, total] = await Promise.all([
       Customer.find(filter).sort({ createdAt: -1 }).skip(skip).limit(Number(limit)).lean(),
       Customer.countDocuments(filter),
     ]);
-
     res.json({ success: true, customers, total });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 
-// @GET /api/customers/:id/history
 const getCustomerHistory = async (req, res) => {
   try {
     const customer = await Customer.findById(req.params.id).lean();
     if (!customer) return res.status(404).json({ success: false, message: 'Customer not found' });
-
     const { recentOrders, customerInsights, loyaltyHistory } = await buildCustomerInsights(req, customer._id);
-
-    res.json({
-      success: true,
-      customer,
-      orders: recentOrders,
-      loyaltyHistory,
-      pointsValue: calculatePointsValue(customer.total_points),
-      customerInsights,
-    });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
+    res.json({ success: true, customer: serializeCustomerForPos(customer), orders: recentOrders, loyaltyHistory, pointsValue: calculatePointsValue(customer.total_points), customerInsights });
+  } catch (err) { res.status(500).json({ success: false, message: err.message }); }
 };
 
 module.exports = { lookupByPhone, createCustomer, updateCustomer, getCustomers, getCustomerHistory };
