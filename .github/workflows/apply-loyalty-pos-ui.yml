@@ -1,0 +1,159 @@
+name: Apply POS Loyalty Redemption UI
+
+on:
+  push:
+    branches:
+      - fix/loyalty-wallet-accrual
+
+permissions:
+  contents: write
+
+jobs:
+  patch-pos:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Patch POS loyalty redemption UI
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('frontend/src/pages/pos/POSScreen.jsx')
+          s = p.read_text()
+
+          old = """  const [showQRModal, setShowQRModal] = useState(false);\n  const [showSplitModal, setShowSplitModal] = useState(false);\n"""
+          new = """  const [showQRModal, setShowQRModal] = useState(false);\n  const [showSplitModal, setShowSplitModal] = useState(false);\n  const [loyaltyWallet, setLoyaltyWallet] = useState({ points: 0, pointsValue: 0, rupeesPerPoint: 0 });\n  const [loyaltyRedeemPoints, setLoyaltyRedeemPoints] = useState('');\n  const [loyaltyRedeemLoading, setLoyaltyRedeemLoading] = useState(false);\n"""
+          if old not in s and "const [loyaltyWallet" not in s:
+              raise SystemExit('billing state marker not found')
+          s = s.replace(old, new, 1)
+
+          old = """  const [couponLoading, setCouponLoading] = useState(false);\n\n  // ── dashboard stats ────────────────────────────────────────────\n"""
+          new = """  const [couponLoading, setCouponLoading] = useState(false);\n\n  // Refresh the customer's global loyalty wallet when the bill/payment screen opens.\n  useEffect(() => {\n    const mobile = activeSession?.customerMobile || phone;\n    if (screen !== 'invoice' || !mobile || String(mobile).replace(/\\D/g, '').length < 10) return;\n    let cancelled = false;\n    api.get(`/loyalty/wallet?phone=${mobile}`).then(r => {\n      if (cancelled) return;\n      const d = r.data || {};\n      setLoyaltyWallet({\n        points: Number(d.points || 0),\n        pointsValue: Number(d.pointsValue || 0),\n        rupeesPerPoint: Number(d.setting?.rupeesPerPoint || 0),\n      });\n    }).catch(() => {});\n    return () => { cancelled = true; };\n  }, [screen, activeSession?.customerMobile, phone]);\n\n  // ── dashboard stats ────────────────────────────────────────────\n"""
+          if old not in s and "Refresh the customer's global loyalty wallet" not in s:
+              raise SystemExit('coupon state marker not found')
+          s = s.replace(old, new, 1)
+
+          marker = """  const recordInvoicePayment = async () => {\n"""
+          handler = r'''  const redeemLoyaltyPoints = async () => {
+    if (!activeSession?.customerId) {
+      toast.error('A registered customer is required to redeem loyalty points');
+      return;
+    }
+    const requested = Math.floor(Number(loyaltyRedeemPoints || 0));
+    const total = Number(activeSession.totalAmount || billGrandTotal || 0);
+    const paid = Number(activeSession.paidAmount || 0);
+    const remaining = Math.max(0, +(total - paid).toFixed(2));
+    const rate = Number(loyaltyWallet.rupeesPerPoint || 0);
+    const maxByBill = rate > 0 ? Math.floor(remaining / rate + 1e-9) : 0;
+    const maxPoints = Math.min(Number(loyaltyWallet.points || 0), maxByBill);
+
+    if (!requested || requested < 1) {
+      toast.error('Enter the number of loyalty points to redeem');
+      return;
+    }
+    if (!rate || maxPoints < 1) {
+      toast.error('No usable loyalty points are available for this bill');
+      return;
+    }
+    if (requested > maxPoints) {
+      toast.error(`Maximum redeemable points: ${maxPoints}`);
+      setLoyaltyRedeemPoints(String(maxPoints));
+      return;
+    }
+
+    setLoyaltyRedeemLoading(true);
+    try {
+      const r = await api.post(`/loyalty/sessions/${activeSession._id}/redeem`, { points: requested });
+      const updated = r.data.session || activeSession;
+      const newRemaining = Number(r.data.balance ?? Math.max(0, Number(updated.totalAmount || total) - Number(updated.paidAmount || 0)));
+      setActiveSession(updated);
+      setInvoice(r.data.invoice || invoice || null);
+      setRunningInvoice(r.data.invoice || runningInvoice || null);
+      setLoyaltyRedeemPoints('');
+      setLoyaltyWallet(prev => ({
+        ...prev,
+        points: Number(r.data.session?.customerId?.total_points ?? Math.max(0, prev.points - Number(r.data.appliedPoints || requested))),
+        pointsValue: Math.max(0, Number(prev.pointsValue) - Number(r.data.redemptionValue || 0)),
+      }));
+      setReceivedAmt(newRemaining > 0 ? newRemaining.toFixed(2) : '');
+      setPaymentRef('');
+
+      if (updated.paymentStatus === 'fully_paid' || updated.status === 'paid') {
+        toast.success(`${r.data.appliedPoints || requested} loyalty points redeemed. Bill fully settled.`);
+        loadStats();
+        loadTables();
+        setTimeout(() => { resetFlow(); setScreen('dashboard'); }, 250);
+      } else {
+        toast.success(`${r.data.appliedPoints || requested} points redeemed · ${fmt(r.data.redemptionValue || 0)} applied`);
+      }
+    } catch (e) {
+      toast.error(e.response?.data?.message || 'Loyalty redemption failed');
+    } finally {
+      setLoyaltyRedeemLoading(false);
+    }
+  };
+
+'''
+          if marker not in s and "const redeemLoyaltyPoints = async () =>" not in s:
+              raise SystemExit('record payment marker not found')
+          s = s.replace(marker, handler + marker, 1)
+
+          old = """                  if (m.includes('split')) return 'Split Paid:';\n                  return 'Cash Paid:';\n"""
+          new = """                  if (m.includes('split')) return 'Split Paid:';\n                  if (m.includes('loyalty')) return 'Loyalty Points Paid:';\n                  return 'Cash Paid:';\n"""
+          if old in s:
+              s = s.replace(old, new, 1)
+
+          marker = """            <div className=\"grid grid-cols-4 gap-1.5\">\n              {[\n                { id: 'Cash', icon: <IndianRupee size={14} />, label: 'Cash' },\n"""
+          loyalty_ui = r'''            {activeSession?.customerId && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-amber-300 font-bold text-sm flex items-center gap-1.5"><Star size={14} className="fill-amber-400"/> Redeem Loyalty Points</div>
+                    <div className="text-[10px] text-amber-200/70 mt-0.5">Available: {loyaltyWallet.points} pts · Value: {fmt(loyaltyWallet.pointsValue)}</div>
+                  </div>
+                  {loyaltyWallet.points > 0 && <button type="button" onClick={() => {
+                    const total = Number(activeSession?.totalAmount || billGrandTotal || 0);
+                    const paid = Number(activeSession?.paidAmount || 0);
+                    const remaining = Math.max(0, +(total - paid).toFixed(2));
+                    const rate = Number(loyaltyWallet.rupeesPerPoint || 0);
+                    setLoyaltyRedeemPoints(String(Math.min(loyaltyWallet.points, rate > 0 ? Math.floor(remaining / rate + 1e-9) : 0)));
+                  }} className="text-[10px] font-bold px-2 py-1 rounded-lg border border-amber-500/40 text-amber-300 hover:bg-amber-500/10">USE MAX</button>}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    type="number"
+                    min="1"
+                    step="1"
+                    value={loyaltyRedeemPoints}
+                    onChange={e => setLoyaltyRedeemPoints(e.target.value.replace(/\D/g, ''))}
+                    placeholder="Enter points to apply"
+                    className="flex-1 bg-[#171717] border border-amber-500/30 rounded-xl px-3 py-2.5 text-sm text-white font-bold outline-none placeholder:text-gray-600"
+                  />
+                  <button type="button" onClick={redeemLoyaltyPoints} disabled={loyaltyRedeemLoading || !loyaltyRedeemPoints || loyaltyWallet.points < 1}
+                    className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-black text-xs">
+                    {loyaltyRedeemLoading ? 'APPLYING...' : 'APPLY POINTS'}
+                  </button>
+                </div>
+                <div className="text-[10px] text-gray-500">1 point = {fmt(loyaltyWallet.rupeesPerPoint)} · Redemption is limited by wallet balance and remaining bill.</div>
+              </div>
+            )}
+
+'''
+          if "Redeem Loyalty Points" not in s:
+              if marker not in s:
+                  raise SystemExit('invoice payment methods marker not found')
+              s = s.replace(marker, loyalty_ui + marker, 1)
+
+          p.write_text(s)
+          PY
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/pages/pos/POSScreen.jsx
+          if git diff --cached --quiet; then
+            echo "No POS UI changes required"
+            exit 0
+          fi
+          git commit -m "feat: add manual loyalty redemption at POS bill checkout"
+          git push
