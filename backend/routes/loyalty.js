@@ -1,21 +1,8 @@
-// ── routes/loyalty.js
 const express = require('express');
 const router = express.Router();
-const Loyalty = require('../models/Loyalty');
-const { protect } = require('../middleware/auth');
-
-router.get('/', protect, async (req, res) => {
-  try {
-    const { customerId } = req.query;
-    const filter = customerId ? { customer_id: customerId } : {};
-    const history = await Loyalty.find(filter)
-      .populate('franchise_id', 'name franchiseCode')
-      .sort({ createdAt: -1 })
-      .limit(50);
-    res.json({ success: true, history });
-  } catch (err) {
-    res.status(500).json({ success: false, message: err.message });
-  }
-});
-
+const { protect, authorise } = require('../middleware/auth');
+const { getSetting, updateSetting, lookupWallet } = require('../controllers/loyaltyController');
+router.get('/settings', protect, authorise('master_admin','pos_staff','shift_operator','manager','franchise_owner'), getSetting);
+router.put('/settings', protect, authorise('master_admin'), updateSetting);
+router.get('/wallet', protect, authorise('pos_staff','shift_operator','manager','franchise_owner'), lookupWallet);
 module.exports = router;
