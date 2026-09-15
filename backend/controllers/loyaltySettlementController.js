@@ -67,7 +67,8 @@ const settleLoyalty = async (req, res) => {
     let invoice = null;
     if (session.paymentStatus === 'fully_paid') {
       session.status = 'paid'; session.closedAt = new Date();
-      const earned = calculateEarnedPoints(Math.max(0, session.totalAmount - session.discountAmount), setting);
+      // totalAmount is already the final amount after discount.
+      const earned = calculateEarnedPoints(Math.max(0, Number(session.totalAmount || 0)), setting);
       const afterRedeem = Number(customer.total_points || 0);
       customer.total_points = +(afterRedeem + earned).toFixed(4);
       customer.total_orders += 1; customer.total_spent += session.totalAmount; customer.last_visit = new Date();
@@ -91,7 +92,7 @@ const finalizeAccrual = async (req, res) => {
     if (await Loyalty.exists({ session_id: session._id, transaction_type: 'earn' })) return res.json({ success: true, earned: session.loyaltyPointsEarned || 0, alreadyFinalized: true });
     const setting = await getGlobalSetting();
     const customer = await Customer.findById(session.customerId);
-    const eligible = Math.max(0, Number(session.totalAmount || 0) - Number(session.discountAmount || 0));
+    const eligible = Math.max(0, Number(session.totalAmount || 0));
     const earned = calculateEarnedPoints(eligible, setting);
     const before = Number(customer.total_points || 0);
     customer.total_points = before + earned; await customer.save();
