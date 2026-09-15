@@ -4,13 +4,14 @@ on:
   push:
     branches:
       - main
+    paths:
+      - .github/workflows/apply-loyalty-pos-ui.yml
 
 permissions:
   contents: write
 
 jobs:
   patch-pos:
-    if: ${{ !contains(github.event.head_commit.message, 'feat: add loyalty points redemption controls to POS') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -29,7 +30,7 @@ jobs:
               s = s.replace(old, new, 1)
 
           old = """  const [couponLoading, setCouponLoading] = useState(false);\n\n  // ── dashboard stats ────────────────────────────────────────────\n"""
-          new = """  const [couponLoading, setCouponLoading] = useState(false);\n\n  // Refresh the customer's loyalty wallet when the bill/payment screen opens.\n  useEffect(() => {\n    const mobile = activeSession?.customerMobile || phone;\n    if (screen !== 'invoice' || !mobile || String(mobile).replace(/\\D/g, '').length < 10) return;\n    let cancelled = false;\n    api.get(`/loyalty/wallet?phone=${mobile}`).then(r => {\n      if (cancelled) return;\n      const d = r.data || {};\n      setLoyaltyWallet({\n        points: Number(d.points || 0),\n        pointsValue: Number(d.pointsValue || 0),\n        rupeesPerPoint: Number(d.setting?.rupeesPerPoint || 0),\n      });\n    }).catch(() => {});\n    return () => { cancelled = true; };\n  }, [screen, activeSession?.customerMobile, phone]);\n\n  // Keep loyalty controls clean when the customer/session changes.\n  useEffect(() => {\n    setUseLoyaltyPoints(false);\n    setLoyaltyRedeemPoints('');\n  }, [activeSession?._id]);\n\n  // ── dashboard stats ────────────────────────────────────────────\n"""
+          new = """  const [couponLoading, setCouponLoading] = useState(false);\n\n  // Refresh the customer's loyalty wallet when the bill/payment screen opens.\n  useEffect(() => {\n    const mobile = activeSession?.customerMobile || phone;\n    if (screen !== 'invoice' || !mobile || String(mobile).replace(/\\D/g, '').length < 10) return;\n    let cancelled = false;\n    api.get(`/loyalty/wallet?phone=${mobile}`).then(r => {\n      if (cancelled) return;\n      const d = r.data || {};\n      setLoyaltyWallet({\n        points: Number(d.points || 0),\n        pointsValue: Number(d.pointsValue || 0),\n        rupeesPerPoint: Number(d.setting?.rupeesPerPoint || 0),\n      });\n    }).catch(() => {});\n    return () => { cancelled = true; };\n  }, [screen, activeSession?.customerMobile, phone]);\n\n  useEffect(() => {\n    setUseLoyaltyPoints(false);\n    setLoyaltyRedeemPoints('');\n  }, [activeSession?._id]);\n\n  // ── dashboard stats ────────────────────────────────────────────\n"""
           if "Refresh the customer's loyalty wallet" not in s:
               if old not in s:
                   raise SystemExit('coupon state marker not found')
