@@ -10,12 +10,11 @@ permissions:
 
 jobs:
   patch-pos:
+    if: ${{ !contains(github.event.head_commit.message, 'feat: add loyalty points redemption controls to POS') }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - name: Patch POS loyalty redemption UI
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: |
           python3 - <<'PY'
           from pathlib import Path
@@ -23,22 +22,31 @@ jobs:
           s = p.read_text()
 
           old = """  const [showQRModal, setShowQRModal] = useState(false);\n  const [showSplitModal, setShowSplitModal] = useState(false);\n"""
-          new = """  const [showQRModal, setShowQRModal] = useState(false);\n  const [showSplitModal, setShowSplitModal] = useState(false);\n  const [loyaltyWallet, setLoyaltyWallet] = useState({ points: 0, pointsValue: 0, rupeesPerPoint: 0 });\n  const [loyaltyRedeemPoints, setLoyaltyRedeemPoints] = useState('');\n  const [loyaltyRedeemLoading, setLoyaltyRedeemLoading] = useState(false);\n"""
-          if old in s:
+          new = """  const [showQRModal, setShowQRModal] = useState(false);\n  const [showSplitModal, setShowSplitModal] = useState(false);\n  const [loyaltyWallet, setLoyaltyWallet] = useState({ points: 0, pointsValue: 0, rupeesPerPoint: 0 });\n  const [useLoyaltyPoints, setUseLoyaltyPoints] = useState(false);\n  const [loyaltyRedeemPoints, setLoyaltyRedeemPoints] = useState('');\n  const [loyaltyRedeemLoading, setLoyaltyRedeemLoading] = useState(false);\n"""
+          if "const [loyaltyWallet, setLoyaltyWallet]" not in s:
+              if old not in s:
+                  raise SystemExit('billing state marker not found')
               s = s.replace(old, new, 1)
 
           old = """  const [couponLoading, setCouponLoading] = useState(false);\n\n  // ── dashboard stats ────────────────────────────────────────────\n"""
-          new = """  const [couponLoading, setCouponLoading] = useState(false);\n\n  // Refresh the customer's loyalty wallet when the bill/payment screen opens.\n  useEffect(() => {\n    const mobile = activeSession?.customerMobile || phone;\n    if (screen !== 'invoice' || !mobile || String(mobile).replace(/\\D/g, '').length < 10) return;\n    let cancelled = false;\n    api.get(`/loyalty/wallet?phone=${mobile}`).then(r => {\n      if (cancelled) return;\n      const d = r.data || {};\n      setLoyaltyWallet({\n        points: Number(d.points || 0),\n        pointsValue: Number(d.pointsValue || 0),\n        rupeesPerPoint: Number(d.setting?.rupeesPerPoint || 0),\n      });\n    }).catch(() => {});\n    return () => { cancelled = true; };\n  }, [screen, activeSession?.customerMobile, phone]);\n\n  // ── dashboard stats ────────────────────────────────────────────\n"""
-          if old in s:
+          new = """  const [couponLoading, setCouponLoading] = useState(false);\n\n  // Refresh the customer's loyalty wallet when the bill/payment screen opens.\n  useEffect(() => {\n    const mobile = activeSession?.customerMobile || phone;\n    if (screen !== 'invoice' || !mobile || String(mobile).replace(/\\D/g, '').length < 10) return;\n    let cancelled = false;\n    api.get(`/loyalty/wallet?phone=${mobile}`).then(r => {\n      if (cancelled) return;\n      const d = r.data || {};\n      setLoyaltyWallet({\n        points: Number(d.points || 0),\n        pointsValue: Number(d.pointsValue || 0),\n        rupeesPerPoint: Number(d.setting?.rupeesPerPoint || 0),\n      });\n    }).catch(() => {});\n    return () => { cancelled = true; };\n  }, [screen, activeSession?.customerMobile, phone]);\n\n  // Keep loyalty controls clean when the customer/session changes.\n  useEffect(() => {\n    setUseLoyaltyPoints(false);\n    setLoyaltyRedeemPoints('');\n  }, [activeSession?._id]);\n\n  // ── dashboard stats ────────────────────────────────────────────\n"""
+          if "Refresh the customer's loyalty wallet" not in s:
+              if old not in s:
+                  raise SystemExit('coupon state marker not found')
               s = s.replace(old, new, 1)
 
           marker = """  const recordInvoicePayment = async () => {\n"""
           handler = r'''  const redeemLoyaltyPoints = async () => {
     if (!activeSession?.customerId) {
       toast.error('A registered customer is required to redeem loyalty points');
-      return;
+      return false;
     }
-    const requested = Math.floor(Number(loyaltyRedeemPoints || 0));
+    const raw = String(loyaltyRedeemPoints ?? '').trim();
+    if (!/^\d+$/.test(raw)) {
+      toast.error('Enter whole loyalty points only');
+      return false;
+    }
+    const requested = Number(raw);
     const total = Number(activeSession.totalAmount || billGrandTotal || 0);
     const paid = Number(activeSession.paidAmount || 0);
     const remaining = Math.max(0, +(total - paid).toFixed(2));
@@ -46,18 +54,18 @@ jobs:
     const maxByBill = rate > 0 ? Math.floor(remaining / rate + 1e-9) : 0;
     const maxPoints = Math.min(Number(loyaltyWallet.points || 0), maxByBill);
 
-    if (!requested || requested < 1) {
-      toast.error('Enter the number of loyalty points to redeem');
-      return;
+    if (requested < 1) {
+      toast.error('Enter at least 1 loyalty point');
+      return false;
     }
     if (!rate || maxPoints < 1) {
       toast.error('No usable loyalty points are available for this bill');
-      return;
+      return false;
     }
     if (requested > maxPoints) {
       toast.error(`Maximum redeemable points: ${maxPoints}`);
       setLoyaltyRedeemPoints(String(maxPoints));
-      return;
+      return false;
     }
 
     setLoyaltyRedeemLoading(true);
@@ -69,14 +77,14 @@ jobs:
       setInvoice(r.data.invoice || invoice || null);
       setRunningInvoice(r.data.invoice || runningInvoice || null);
       setLoyaltyRedeemPoints('');
+      setUseLoyaltyPoints(false);
       setLoyaltyWallet(prev => ({
         ...prev,
-        points: Number(r.data.session?.customerId?.total_points ?? Math.max(0, prev.points - Number(r.data.appliedPoints || requested))),
+        points: Math.max(0, Number(prev.points) - Number(r.data.appliedPoints || requested)),
         pointsValue: Math.max(0, Number(prev.pointsValue) - Number(r.data.redemptionValue || 0)),
       }));
       setReceivedAmt(newRemaining > 0 ? newRemaining.toFixed(2) : '');
       setPaymentRef('');
-
       if (updated.paymentStatus === 'fully_paid' || updated.status === 'paid') {
         toast.success(`${r.data.appliedPoints || requested} loyalty points redeemed. Bill fully settled.`);
         loadStats();
@@ -85,8 +93,10 @@ jobs:
       } else {
         toast.success(`${r.data.appliedPoints || requested} points redeemed · ${fmt(r.data.redemptionValue || 0)} applied`);
       }
+      return true;
     } catch (e) {
       toast.error(e.response?.data?.message || 'Loyalty redemption failed');
+      return false;
     } finally {
       setLoyaltyRedeemLoading(false);
     }
@@ -105,21 +115,29 @@ jobs:
           loyalty_ui = r'''            {activeSession?.customerId && loyaltyWallet.points > 0 && (
               <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-2">
                 <label className="flex items-center gap-2 cursor-pointer">
-                  <input type="checkbox" checked={loyaltyRedeemPoints !== ''} onChange={e => {
-                    if (!e.target.checked) setLoyaltyRedeemPoints('');
-                    else setLoyaltyRedeemPoints('');
+                  <input type="checkbox" checked={useLoyaltyPoints} onChange={e => {
+                    const checked = e.target.checked;
+                    setUseLoyaltyPoints(checked);
+                    if (!checked) setLoyaltyRedeemPoints('');
+                    else {
+                      const rate = Number(loyaltyWallet.rupeesPerPoint || 0);
+                      const remaining = Math.max(0, +(Number(activeSession?.totalAmount || billGrandTotal || 0) - Number(activeSession?.paidAmount || 0)).toFixed(2));
+                      const maxByBill = rate > 0 ? Math.floor(remaining / rate + 1e-9) : 0;
+                      const maxPoints = Math.min(Number(loyaltyWallet.points || 0), maxByBill);
+                      setLoyaltyRedeemPoints(maxPoints > 0 ? String(maxPoints) : '');
+                    }
                   }} className="h-4 w-4 accent-amber-500" />
                   <span className="text-amber-300 font-bold text-sm">Use Loyalty Points</span>
                   <span className="text-[10px] text-amber-200/70 ml-auto">Available: {loyaltyWallet.points} pts · {fmt(loyaltyWallet.pointsValue)}</span>
                 </label>
-                {loyaltyRedeemPoints !== '' && (
+                {useLoyaltyPoints && (
                   <div className="space-y-2">
                     <div className="flex gap-2">
-                      <input type="number" min="1" step="1" value={loyaltyRedeemPoints}
+                      <input type="text" inputMode="numeric" pattern="[0-9]*" value={loyaltyRedeemPoints}
                         onChange={e => setLoyaltyRedeemPoints(e.target.value.replace(/\D/g, ''))}
                         placeholder="Points to redeem"
-                        className="flex-1 bg-[#171717] border border-amber-500/30 rounded-xl px-3 py-2.5 text-sm text-white font-bold outline-none" />
-                      <button type="button" onClick={redeemLoyaltyPoints} disabled={loyaltyRedeemLoading}
+                        className="flex-1 bg-[#171717] border border-amber-500/30 rounded-xl px-3 py-2.5 text-sm text-white font-bold outline-none placeholder:text-gray-600" />
+                      <button type="button" onClick={redeemLoyaltyPoints} disabled={loyaltyRedeemLoading || !loyaltyRedeemPoints}
                         className="px-4 py-2.5 rounded-xl bg-amber-500 hover:bg-amber-400 disabled:opacity-40 text-black font-black text-xs">
                         {loyaltyRedeemLoading ? 'APPLYING...' : 'APPLY POINTS'}
                       </button>
