@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/global-loyalty-rewards
+      - fix/loyalty-wallet-accrual
   pull_request:
     branches:
       - main
