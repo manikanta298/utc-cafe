@@ -24,7 +24,9 @@ orderSessionSchema.post('save', async function(doc) {
     }
 
     const setting = await GlobalLoyaltySetting.findOne({key:'global'}).lean() || {earningAmount:100,earningPoints:10};
-    const eligible = Math.max(0, Number(doc.totalAmount || 0) - Number(doc.discountAmount || 0));
+    // totalAmount is already the final bill after discount; do not subtract the
+    // discount a second time or discounted bills will under-credit loyalty.
+    const eligible = Math.max(0, Number(doc.totalAmount || 0));
     const earned = Math.floor(eligible / Number(setting.earningAmount || 100) * Number(setting.earningPoints || 10));
     const customer = await Customer.findById(doc.customerId);
     if (!customer) return;
